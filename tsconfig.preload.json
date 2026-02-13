@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist/app",
+    "rootDir": "app",
+    "noEmit": false
+  },
+  "include": ["app/preload/index.ts"],
+  "exclude": ["node_modules"]
+}

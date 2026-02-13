@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-and-simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run simulator:all
+      - name: Upload parity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-report
+          path: |
+            artifacts/parity-report.json
+            artifacts/parity-summary.md

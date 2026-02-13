@@ -1,0 +1,55 @@
+---
+description: 5240 PcOff Electron 프로젝트 요구사항·API·아키텍처 준수 (PRD/TRD/API/VIBE 기준)
+alwaysApply: true
+---
+
+# 5240 PcOff Electron 프로젝트 룰
+
+이 프로젝트는 MFC 레거시를 Electron + TypeScript로 전환하는 5240.PcOff Agent다. 단일 소스: `PRD_5240_PcOff_Electron.md`, `TRD_5240_PcOff_Electron.md`, `PC_OFF_AGENT_API.md`, `VIBE_PROMPT_IMPLEMENTATION.md`.
+
+## 에이전트 실행 흐름
+
+에이전트는 **항상 계획을 먼저 세운 뒤** 실행한다.
+
+1. **계획 수립**: 사용자 요청을 분석하고, 필요한 단계·순서·의존관계를 정리한다. 복잡한 작업(3단계 이상, 여러 파일 수정, 신규 기능 등)이면 반드시 명시적 계획을 세운다.
+2. **Todos 체크리스트 생성**: `TodoWrite` 도구로 할 일 목록을 만들고, 가능하면 첫 항목을 `in_progress`로 두고 바로 작업을 시작한다.
+3. **실행**: 체크리스트 항목별로 진행하며 완료 시 상태를 갱신한다. 새 작업을 시작할 때는 현재 항목을 `completed`로 바꾼 뒤 다음 항목을 `in_progress`로 전환한다.
+
+단순한 요청(한두 줄 수정, 단일 파일 읽기 등)은 todos 없이 진행해도 되며, 작업이 늘어나면 그 시점에 체크리스트를 추가해도 된다.
+
+## 필수 제약
+
+- **기능 동등성**: 기존 MFC 시나리오와 결과(상태·로그·API 파라미터)가 동일해야 함. UI 표시가 아니라 시나리오 결과로 판단.
+- **자동 업데이트**: 사용자 확인 다이얼로그 금지. 감지 시 백그라운드 다운로드 후 무확인 적용.
+- **비밀번호 변경**: 확인 UI만 제공. 비밀번호 검증·재로그인 요구 금지.
+- **크로스 플랫폼**: Windows·macOS 동일 수준 동작. OS별 회귀 테스트 유지.
+- **시뮬레이터**: CLI로 시나리오 실행 가능, CI에서 자동 실행.
+- **Agent Guard**: 삭제/우회 탐지, 무결성 체크, 자동 복구 트리거 필수.
+- **Ops Observer**: heartbeat, 비정상 종료·통신 두절, 설치자 레지스트리 동기화.
+
+## API·통신
+
+- PCOFF 통신 규격은 `PC_OFF_AGENT_API.md`를 단일 소스로 사용.
+- Lock On/Off, 이석, 임시연장, 긴급사용 여부는 **반드시** `/getPcOffWorkTime.do` 응답 기준으로 판단.
+- 모든 API 호출은 타입이 명확한 클라이언트로 감싸고, 요청/응답을 구조화된 로그(JSONL)로 남김. 네트워크 장애 시 ops-observer에 보고.
+- 출퇴근 산정: `callCmmPcOnOffLogPrc.do`의 IN/OUT 규칙 및 `docs/operations/logcode.md` 매핑 준수.
+
+## 아키텍처·폴더
+
+- **Process**: Main(생명주기·업데이트·OS·무결성), Renderer(UI·화면 전환), Preload(contextIsolation 유지).
+- **모듈**: app-shell, update-manager, auth-policy, feature-core, simulator, telemetry-log, agent-guard, ops-observer. 역할은 TRD §2 참고.
+- **폴더**: `app/main`, `app/renderer`, `app/preload`, `app/core` 분리. 시뮬레이터는 `simulator/`.
+- **로컬 저장**: `config.json`, `state.json`, `logs/YYYY-MM-DD.jsonl`, `guard/integrity.json`, `update/retry-queue.json`.
+- **상태 머신**: INIT → LOGIN_REQUIRED → AUTHENTICATED → LOCKED / UNLOCK_PENDING_REASON / TIMER_RUNNING / ALERTING / UPDATE_* / ERROR_STATE. feature-core에서 구현.
+
+## 로깅
+
+- JSONL 형식. 필드: `timestamp`(ISO8601), `logCode`, `level`, `sessionId`, `deviceId`, `userId`, `payload`.
+- 필수 이벤트: APP_START, LOGIN_SUCCESS/FAIL, LOCK_TRIGGERED/UNLOCK_TRIGGERED, UPDATE_*, PASSWORD_CHANGE_DETECTED/CONFIRM_DONE, AGENT_TAMPER_DETECTED/RECOVERED, CRASH_DETECTED, OFFLINE_DETECTED. logcode.md와 동기화.
+
+## 업데이트·Guard
+
+- 업데이트: 무결성(hash/signature) 검증. 실패 시 롤백 또는 재시도 큐. UI 프롬프트 없음.
+- Agent Guard: Windows(서비스·ACL·Watchdog), macOS(LaunchDaemon·notarization/code signing). 바이너리 해시·중요 파일 모니터링.
+
+새 기능 추가·API 변경 시 위 문서들을 먼저 반영하고, DoD(PRD §9)와 시뮬레이터 시나리오로 검증한다.

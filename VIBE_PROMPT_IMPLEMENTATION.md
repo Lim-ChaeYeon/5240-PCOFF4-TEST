@@ -26,10 +26,9 @@ You are a senior Electron + TypeScript architect and implementer. Your task is t
 
 참고해야 할 문서 목록:
 
-* `docs/requirements/PRD_5240_PcOff_Electron.md`
-* `docs/technical/TRD_5240_PcOff_Electron.md`
-* `docs/integration/PC_OFF_AGENT_API.md`
-* `docs/operations/logcode.md` (로그 코드 매핑)
+* `PRD_5240_PcOff_Electron.md`
+* `TRD_5240_PcOff_Electron.md`
+* `PC_OFF_AGENT_API.md`
 
 이 외에도 API 명세(`api.md`)나 기타 서버 문서가 제공되면 함께 참고한다.
 

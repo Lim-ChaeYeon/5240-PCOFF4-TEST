@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>5240 PcOff Agent</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="login-view" class="login-view hidden">
+      <section class="fixed login-fixed">
+        <header class="top-box">
+          <div class="logo-item">
+            <span class="logo-mark">5240</span>
+            <div class="logo-text-wrap">
+              <strong>PCOFF AGENT</strong>
+              <span>로그인</span>
+            </div>
+          </div>
+        </header>
+        <section class="dashboard">
+          <h1 class="title">로그인</h1>
+          <div id="login-step1" class="login-step">
+            <label class="login-label">전화번호</label>
+            <input id="login-phone" type="tel" class="login-input" placeholder="010-0000-0000" autocomplete="tel" />
+            <span class="login-hint">하이픈(010-1234-5678) 있거나 없이(01012345678) 입력해도 됩니다.</span>
+            <p id="login-step1-error" class="login-error"></p>
+            <button id="login-next" class="button primary">다음</button>
+          </div>
+          <div id="login-step2" class="login-step hidden">
+            <label class="login-label">서비스 영역</label>
+            <select id="login-servarea" class="login-input"></select>
+            <label class="login-label">사용자 ID</label>
+            <input id="login-userid" type="text" class="login-input" placeholder="사용자 ID" />
+            <label class="login-label">비밀번호</label>
+            <input id="login-password" type="password" class="login-input" placeholder="비밀번호" />
+            <p id="login-step2-error" class="login-error"></p>
+            <button id="login-submit" class="button primary">로그인</button>
+            <button id="login-back" class="button ghost">이전</button>
+          </div>
+        </section>
+      </section>
+    </div>
+
+    <main id="main-view" class="screen hidden">
+      <section class="fixed">
+        <header class="top-box">
+          <div class="logo-item">
+            <span class="logo-mark">5240</span>
+            <div class="logo-text-wrap">
+              <strong>PCOFF AGENT</strong>
+              <span>Smart Work Time Control</span>
+            </div>
+          </div>
+          <div class="top-actions">
+            <button id="check-update" class="mini-button">업데이트 확인</button>
+            <span id="state-badge" class="state-badge">state: loading</span>
+          </div>
+        </header>
+
+        <section class="dashboard">
+          <h1 id="lock-title" class="title">지금은 PC 화면이 잠겨있습니다.</h1>
+          <p id="lock-info" class="info">
+            PC 사용이 종료되었습니다. 임시연장은 PC-OFF 시간부터 정책에 따라 사용할 수 있습니다.
+          </p>
+          <button id="get-attend" class="action-link">나의 근태정보 불러오기</button>
+        </section>
+
+        <footer class="bottom-box">
+          <div class="button-box">
+            <button id="btn-extend" class="button ghost">
+              <span>임시연장</span>
+              <em id="extend-count" class="badge">0</em>
+            </button>
+            <button id="btn-use" class="button ghost">
+              <span>긴급사용</span>
+            </button>
+          </div>
+          <div class="time-box">
+            <span id="date-text"></span>
+            <strong id="time-text">--:--:--</strong>
+          </div>
+          <div class="button-box right">
+            <button id="btn-play" class="button primary">PC-ON</button>
+            <button id="btn-off" class="button danger">PC-OFF</button>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+    <aside id="attend-panel" class="attend-panel">
+      <div class="panel-head">
+        <strong>근태정보</strong>
+        <button id="close-attend" class="panel-close">닫기</button>
+      </div>
+      <pre id="attend-content"></pre>
+    </aside>
+
+    <div id="toast" class="toast"></div>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

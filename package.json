@@ -1,0 +1,25 @@
+{
+  "name": "pcoff-electron-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "5240 PcOff Agent Electron scaffold",
+  "main": "dist/app/main/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.preload.json",
+    "postbuild": "node ./scripts/sync-static.mjs",
+    "preview:web": "npx serve -s build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.preload.json",
+    "simulator": "tsx simulator/cli.ts run --scenario update_success",
+    "simulator:all": "tsx simulator/cli.ts run-all",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "electron": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

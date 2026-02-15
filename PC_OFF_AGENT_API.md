@@ -185,6 +185,26 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 
 ---
 
+### 2.7 에이전트 이벤트 보고 (FR-08, Ops Observer)
+
+**Endpoint:** `POST /reportAgentEvents.do`
+
+**Scenario:** 에이전트가 heartbeat, 크래시 감지(CRASH_DETECTED), 통신 두절(OFFLINE_DETECTED) 등 이벤트를 중앙 서버에 배치 전송한다. 서버에 "중지/충돌/통신단절" 기록이 남도록 한다.
+
+**Request Body (JSON)**
+
+| 필드 | 설명 |
+|------|------|
+| `deviceId` | 기기 식별자(플랫폼 등) |
+| `sessionId` | 세션 식별자 |
+| `events` | 로그 항목 배열. 각 항목: `timestamp`, `logCode`, `level`, `sessionId`, `deviceId`, `payload` |
+
+**logCode 예:** `APP_START`, `HEARTBEAT`, `CRASH_DETECTED`, `OFFLINE_DETECTED`, `AGENT_TAMPER_DETECTED`, `UPDATE_FOUND` 등 (`docs/operations/logcode.md` 참고).
+
+**Response:** 서버는 2xx로 수신 확인 시 성공으로 간주한다. 실패 시 클라이언트는 지수 백오프 후 재시도한다.
+
+---
+
 ## 3. To‑Be (Electron) 구현 시 주의사항
 
 ### 3.1 API 클라이언트 요구

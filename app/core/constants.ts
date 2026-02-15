@@ -6,6 +6,7 @@ export const PATHS = {
   logsDir: "logs",
   guardDir: "guard",
   integrity: "guard/integrity.json",
+  watchList: "guard/watch-list.json",
   updateDir: "update",
   retryQueue: "update/retry-queue.json"
 } as const;
@@ -19,6 +20,11 @@ export const LOG_CODES = {
   PASSWORD_CHANGE_DETECTED: "PASSWORD_CHANGE_DETECTED",
   PASSWORD_CONFIRM_DONE: "PASSWORD_CONFIRM_DONE",
   AGENT_TAMPER_DETECTED: "AGENT_TAMPER_DETECTED",
+  AGENT_TAMPER_ATTEMPT: "AGENT_TAMPER_ATTEMPT",
   AGENT_RECOVERED: "AGENT_RECOVERED",
-  OFFLINE_DETECTED: "OFFLINE_DETECTED"
+  AGENT_RECOVERY_FAILED: "AGENT_RECOVERY_FAILED",
+  AGENT_STOP_ATTEMPT: "AGENT_STOP_ATTEMPT",
+  OFFLINE_DETECTED: "OFFLINE_DETECTED",
+  CRASH_DETECTED: "CRASH_DETECTED",
+  HEARTBEAT: "HEARTBEAT"
 } as const;

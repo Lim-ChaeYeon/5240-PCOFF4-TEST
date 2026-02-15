@@ -16,6 +16,8 @@ npm run build
 npm start
 ```
 
+- **macOS**: 일부 환경에서 `ELECTRON_RUN_AS_NODE`가 설정되어 있으면 앱이 시작되지 않을 수 있습니다. 터미널에서 `unset ELECTRON_RUN_AS_NODE` 후 `npm start`를 실행하세요.
+
 ---
 
 ## 테스트 방법
@@ -97,8 +99,11 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **메인(잠금) 화면**: 근태정보 조회, 임시연장/긴급사용/PC-ON/PC-OFF 버튼, screenType·pcOnYn·긴급사용 정책 반영
 - **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callCmmPcOnOffLogPrc
 - **시뮬레이터·CI**: Flow-01~08 시나리오, parity-report.json, parity-summary.md, CI 아티팩트
-- **로깅**: JSONL, TelemetryLogger, APP_START, LOGIN_SUCCESS/FAIL 등 일부 이벤트
-- **업데이트·Guard·Auth**: 스캐폴드(모의 다운로드/검증, 해시 기반 무결성, 비밀번호 변경 로그만)
+- **로깅**: JSONL, TelemetryLogger, APP_START, LOGIN_SUCCESS/FAIL, UPDATE_*, AGENT_* 등 이벤트 (logcode.md 참고)
+- **자동 업데이트 (FR-03)**: `electron-updater` 기반 무확인 자동 업데이트, 재시도 큐, 진행률 UI 표시 ✅
+- **비밀번호 변경 확인 (FR-04)**: 서버 `pwdChgYn=Y` 감지 시 확인 전용 모달, 검증/재로그인 없음 ✅
+- **Agent Guard (FR-07)**: 무결성 체크(SHA-256), 파일 감시, 탐지 시 로그·복구 트리거, IPC 연동 ✅
+- **Ops Observer (FR-08)**: heartbeat·로그 배치 서버 전송(`/reportAgentEvents.do`), 크래시/오프라인 보고 ✅
 
 ---
 
@@ -106,16 +111,12 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 
 | 순서 | 항목 | 요약 |
 |------|------|------|
-| 1 | 자동 업데이트 실구현 | 실제 다운로드/무결성 검증/무확인 적용, 실패 시 재시도·롤백 (FR-03, Flow-03/04) |
-| 2 | 비밀번호 변경 이벤트 + 확인 UI | 서버 감지 → 확인 UI만, 비밀번호 검증·재로그인 없음 (FR-04, Flow-05) |
-| 3 | Agent Guard 실구현 | Windows/macOS 삭제·우회 탐지, 무결성 체크, 자동 복구 (FR-07, Flow-06) |
-| 4 | Ops Observer 실구현 | 비정상 종료·통신 두절 시 서버 로그 전송 (FR-08, Flow-07) |
-| 5 | 설치자 레지스트리 | 설치자 정보 서버 등록·조회 (FR-09, Flow-08) |
-| 6 | 이석 해제 플로우 | 이석 화면 사유 입력 후 PC-ON (Flow-02 연계) |
-| 7 | 로그 코드 전수 반영 | logcode.md와 필수 이벤트 매핑 (PRD §7) |
-| 8 | 패키징·플랫폼 검증 | Windows installer, macOS pkg/dmg, 코드 서명 (NFR-01, DoD) |
+| 1 | 설치자 레지스트리 | 설치자 정보 서버 등록·조회 (FR-09, Flow-08) |
+| 2 | 이석 해제 플로우 | 이석 화면 사유 입력 후 PC-ON (Flow-02 연계) |
+| 3 | 로그 코드 전수 반영 | logcode.md와 필수 이벤트 매핑 (PRD §7) |
+| 4 | 패키징·플랫폼 검증 | Windows installer, macOS pkg/dmg, 코드 서명 (NFR-01, DoD) |
 
-상세 내용은 ** [docs/다음_개발_진행_사항.md](docs/다음_개발_진행_사항.md)** 참고.
+상세 내용은 **[docs/다음_개발_진행_사항.md](docs/다음_개발_진행_사항.md)** 참고.
 
 ---
 
@@ -124,7 +125,8 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **[docs/테스트_가이드_비개발자.md](docs/테스트_가이드_비개발자.md)** — 비개발자용 테스트 방법 (단계별·상세·문제 해결)
 - [docs/로그인_테스트.md](docs/로그인_테스트.md) — 로그인 테스트 방법·개발자 로그아웃 핫키
 - [PRD_5240_PcOff_Electron.md](PRD_5240_PcOff_Electron.md) — 제품 요구사항
-- [TRD_5240_PcOff_Electron.md](TRD_5240_PcOff_Electron.md) — 기술 요구사항·아키텍처
+- [TRD_5240_PcOff_Electron.md](TRD_5240_PcOff_Electron.md) — 기술 요구사항·아키텍처·IPC
 - [PC_OFF_AGENT_API.md](PC_OFF_AGENT_API.md) — PCOFF API 규격
 - [docs/다음_개발_진행_사항.md](docs/다음_개발_진행_사항.md) — 완료 항목·다음 작업 정리
+- [docs/개발_이력_리포트.md](docs/개발_이력_리포트.md) — 개발 이력·이슈 해결 기록
 - [docs/operations/logcode.md](docs/operations/logcode.md) — 로그 코드 매핑

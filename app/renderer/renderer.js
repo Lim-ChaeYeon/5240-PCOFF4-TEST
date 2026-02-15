@@ -15,6 +15,7 @@ const btnPlayEl = document.getElementById("btn-play");
 const btnOffEl = document.getElementById("btn-off");
 const getAttendEl = document.getElementById("get-attend");
 const checkUpdateEl = document.getElementById("check-update");
+const userDisplayEl = document.getElementById("user-display");
 
 function showView(name) {
   if (loginViewEl) loginViewEl.classList.toggle("hidden", name !== "login");
@@ -94,6 +95,50 @@ async function runAction(label, action) {
     showToast(`${label} 오류`);
     console.error(error);
   }
+}
+
+/** 긴급사용 사유 입력 모달 표시 (prompt 대체). 확인 시 사유 문자열, 취소 시 null */
+function showEmergencyReasonModal() {
+  const overlay = document.getElementById("emergency-modal");
+  const input = document.getElementById("emergency-reason-input");
+  const btnCancel = document.getElementById("emergency-modal-cancel");
+  const btnConfirm = document.getElementById("emergency-modal-confirm");
+  if (!overlay || !input) return Promise.resolve(null);
+
+  input.value = "긴급 업무 처리";
+  overlay.classList.remove("hidden");
+  input.focus();
+
+  return new Promise((resolve) => {
+    const close = (value) => {
+      overlay.classList.add("hidden");
+      btnCancel.removeEventListener("click", onCancel);
+      btnConfirm.removeEventListener("click", onConfirm);
+      overlay.removeEventListener("click", onOverlayClick);
+      input.removeEventListener("keydown", onKeydown);
+      resolve(value);
+    };
+    const onCancel = () => close(null);
+    const onConfirm = () => {
+      const reason = (input.value ?? "").trim();
+      if (!reason) {
+        showToast("긴급사용 사유를 입력해 주세요.");
+        return;
+      }
+      close(reason);
+    };
+    const onOverlayClick = (e) => {
+      if (e.target === overlay) close(null);
+    };
+    const onKeydown = (e) => {
+      if (e.key === "Escape") close(null);
+      if (e.key === "Enter") onConfirm();
+    };
+    btnCancel.addEventListener("click", onCancel);
+    btnConfirm.addEventListener("click", onConfirm);
+    overlay.addEventListener("click", onOverlayClick);
+    input.addEventListener("keydown", onKeydown);
+  });
 }
 
 function updateClock() {
@@ -195,6 +240,21 @@ async function bootstrap() {
   }
   stateBadgeEl.textContent = `state: ${currentState}`;
 
+  if (window.pcoffApi?.getCurrentUser && userDisplayEl) {
+    try {
+      const user = await window.pcoffApi.getCurrentUser();
+      const parts = [];
+      if (user.corpNm) parts.push(user.corpNm);
+      if (user.loginUserNm) parts.push(user.loginUserNm);
+      if (user.posNm) parts.push(user.posNm);
+      userDisplayEl.textContent = parts.length > 0 ? parts.join(" · ") : "";
+      userDisplayEl.style.display = parts.length > 0 ? "" : "none";
+    } catch {
+      userDisplayEl.textContent = "";
+      userDisplayEl.style.display = "none";
+    }
+  }
+
   let work = parseQueryWork();
   if (window.pcoffApi?.getWorkTime) {
     try {
@@ -215,8 +275,8 @@ async function bootstrap() {
   });
   btnUseEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestEmergencyUse) return showToast("preview 모드: 긴급사용");
-    const reason = window.prompt("긴급사용 사유를 입력해 주세요.", "긴급 업무 처리") ?? "";
-    if (!reason) return;
+    const reason = await showEmergencyReasonModal();
+    if (reason == null || reason === "") return;
     await runAction("긴급사용", () => window.pcoffApi.requestEmergencyUse(reason));
   });
   btnPlayEl?.addEventListener("click", async () => {
@@ -230,13 +290,83 @@ async function bootstrap() {
   getAttendEl?.addEventListener("click", () => openAttendPanel(work));
   document.getElementById("close-attend")?.addEventListener("click", () => attendPanelEl.classList.remove("active"));
 
+  // 업데이트 버튼 및 상태 표시
   if (window.pcoffApi) {
     checkUpdateEl?.addEventListener("click", async () => {
-      await window.pcoffApi.requestUpdateCheck();
-      showToast("업데이트 확인 요청");
+      checkUpdateEl.disabled = true;
+      checkUpdateEl.textContent = "확인 중...";
+      try {
+        const status = await window.pcoffApi.requestUpdateCheck();
+        updateCheckButton(status);
+      } catch (e) {
+        showToast("업데이트 확인 오류");
+        checkUpdateEl.disabled = false;
+        checkUpdateEl.textContent = "업데이트 확인";
+      }
     });
+
+    // 업데이트 진행률 실시간 수신
+    if (window.pcoffApi.onUpdateProgress) {
+      window.pcoffApi.onUpdateProgress((data) => {
+        const pct = Math.round(data.percent);
+        checkUpdateEl.textContent = `다운로드 ${pct}%`;
+      });
+    }
+
+    // 앱 버전 표시
+    if (window.pcoffApi.getAppVersion) {
+      window.pcoffApi.getAppVersion().then((ver) => {
+        const versionEl = document.getElementById("app-version");
+        if (versionEl) versionEl.textContent = `v${ver}`;
+      });
+    }
   } else {
     checkUpdateEl?.addEventListener("click", () => showToast("preview 모드: update check"));
+  }
+}
+
+/** 업데이트 상태에 따라 버튼 텍스트 업데이트 */
+function updateCheckButton(status) {
+  const checkUpdateEl = document.getElementById("check-update");
+  if (!checkUpdateEl) return;
+
+  switch (status.state) {
+    case "checking":
+      checkUpdateEl.textContent = "확인 중...";
+      checkUpdateEl.disabled = true;
+      break;
+    case "available":
+      checkUpdateEl.textContent = `v${status.version} 다운로드 중`;
+      checkUpdateEl.disabled = true;
+      break;
+    case "downloading":
+      checkUpdateEl.textContent = `다운로드 ${status.progress ?? 0}%`;
+      checkUpdateEl.disabled = true;
+      break;
+    case "downloaded":
+      checkUpdateEl.textContent = "재시작 대기";
+      checkUpdateEl.disabled = true;
+      showToast("업데이트 다운로드 완료, 곧 재시작됩니다");
+      break;
+    case "not-available":
+      checkUpdateEl.textContent = "최신 버전";
+      checkUpdateEl.disabled = false;
+      showToast("현재 최신 버전입니다");
+      setTimeout(() => {
+        checkUpdateEl.textContent = "업데이트 확인";
+      }, 3000);
+      break;
+    case "error":
+      checkUpdateEl.textContent = "업데이트 오류";
+      checkUpdateEl.disabled = false;
+      showToast(status.error || "업데이트 확인 실패");
+      setTimeout(() => {
+        checkUpdateEl.textContent = "업데이트 확인";
+      }, 3000);
+      break;
+    default:
+      checkUpdateEl.textContent = "업데이트 확인";
+      checkUpdateEl.disabled = false;
   }
 }
 
@@ -348,8 +478,75 @@ function setupLogoutHotkey() {
   });
 }
 
+/**
+ * FR-04: 비밀번호 변경 확인 모달 표시
+ * 비밀번호 검증 없이 확인만 수행
+ */
+function showPasswordChangeModal(message) {
+  const overlay = document.getElementById("password-change-modal");
+  const messageEl = document.getElementById("password-change-message");
+  const btnConfirm = document.getElementById("password-change-confirm");
+  if (!overlay) return;
+
+  if (messageEl) {
+    messageEl.textContent = message || "비밀번호가 변경되었습니다.";
+  }
+  overlay.classList.remove("hidden");
+
+  const close = async () => {
+    overlay.classList.add("hidden");
+    btnConfirm?.removeEventListener("click", onConfirm);
+    overlay.removeEventListener("click", onOverlayClick);
+    document.removeEventListener("keydown", onKeydown);
+
+    // FR-04: 확인 API 호출 (비밀번호 검증 없음)
+    if (window.pcoffApi?.confirmPasswordChange) {
+      try {
+        await window.pcoffApi.confirmPasswordChange();
+        showToast("비밀번호 변경 확인됨");
+      } catch (e) {
+        console.error("confirmPasswordChange error:", e);
+      }
+    }
+  };
+  const onConfirm = () => close();
+  const onOverlayClick = (e) => {
+    // 모달 외부 클릭 시에도 확인 처리 (강제 닫기 방지 - 확인만 가능)
+    // 단, 사용자 편의를 위해 외부 클릭도 확인으로 처리
+    if (e.target === overlay) close();
+  };
+  const onKeydown = (e) => {
+    if (e.key === "Escape" || e.key === "Enter") close();
+  };
+
+  btnConfirm?.addEventListener("click", onConfirm);
+  overlay.addEventListener("click", onOverlayClick);
+  document.addEventListener("keydown", onKeydown);
+}
+
+/**
+ * 비밀번호 변경 이벤트 리스너 설정
+ */
+function setupPasswordChangeListener() {
+  if (!window.pcoffApi?.onPasswordChangeDetected) return;
+
+  window.pcoffApi.onPasswordChangeDetected((data) => {
+    showPasswordChangeModal(data.message);
+  });
+
+  // 앱 시작 시 이미 비밀번호 변경이 감지된 상태인지 확인
+  if (window.pcoffApi.getPasswordChangeState) {
+    window.pcoffApi.getPasswordChangeState().then((state) => {
+      if (state.detected) {
+        showPasswordChangeModal(state.message);
+      }
+    });
+  }
+}
+
 async function init() {
   setupLogoutHotkey();
+  setupPasswordChangeListener(); // FR-04: 비밀번호 변경 이벤트 리스너
   if (!window.pcoffApi) {
     showView("login");
     setupLoginFlow();

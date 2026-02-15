@@ -53,6 +53,8 @@
             </div>
           </div>
           <div class="top-actions">
+            <span id="user-display" class="user-display" aria-label="로그인 사용자"></span>
+            <span id="app-version" class="version-badge"></span>
             <button id="check-update" class="mini-button">업데이트 확인</button>
             <span id="state-badge" class="state-badge">state: loading</span>
           </div>
@@ -97,6 +99,31 @@
     </aside>
 
     <div id="toast" class="toast"></div>
+
+    <div id="emergency-modal" class="modal-overlay hidden" aria-label="긴급사용 사유 입력">
+      <div class="modal-box">
+        <h2 class="modal-title">긴급사용 사유</h2>
+        <p class="modal-desc">사유를 입력한 뒤 확인을 눌러 주세요.</p>
+        <input id="emergency-reason-input" type="text" class="login-input modal-input" placeholder="예: 긴급 업무 처리" maxlength="200" />
+        <div class="modal-actions">
+          <button id="emergency-modal-cancel" class="button ghost">취소</button>
+          <button id="emergency-modal-confirm" class="button primary">확인</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FR-04: 비밀번호 변경 확인 모달 (검증 없이 확인만) -->
+    <div id="password-change-modal" class="modal-overlay hidden" aria-label="비밀번호 변경 확인">
+      <div class="modal-box">
+        <h2 class="modal-title">비밀번호 변경 알림</h2>
+        <p id="password-change-message" class="modal-desc">비밀번호가 변경되었습니다.</p>
+        <p class="modal-hint">확인 버튼을 눌러 계속 사용하세요. (재로그인이 필요하지 않습니다)</p>
+        <div class="modal-actions">
+          <button id="password-change-confirm" class="button primary">확인</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./renderer.js"></script>
   </body>
 </html>

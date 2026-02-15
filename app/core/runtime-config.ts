@@ -13,7 +13,26 @@ export interface AppState {
   userStaffId?: string;
   loginUserId?: string;
   loginUserNm?: string;
+  posNm?: string;
+  corpNm?: string;
   lastLoginAt?: string;
+}
+
+/** 로그인된 사용자 표시용 정보 (state.json에서 읽음) */
+export async function getLoginUserDisplay(baseDir: string): Promise<{
+  loginUserNm?: string;
+  loginUserId?: string;
+  posNm?: string;
+  corpNm?: string;
+}> {
+  const statePath = join(baseDir, PATHS.state);
+  const state = await readJson<AppState>(statePath, {});
+  return {
+    loginUserNm: state.loginUserNm,
+    loginUserId: state.loginUserId,
+    posNm: state.posNm,
+    corpNm: state.corpNm
+  };
 }
 
 /** API 베이스 URL만 (로그인 화면에서 서비스영역/로그인 호출용) */
@@ -47,7 +66,7 @@ export async function saveLoginState(baseDir: string, state: AppState): Promise<
 export async function clearLoginState(baseDir: string): Promise<void> {
   const statePath = join(baseDir, PATHS.state);
   const existing = await readJson<AppState>(statePath, {});
-  const { userServareaId, userStaffId, loginUserId, loginUserNm, lastLoginAt, ...rest } = existing;
+  const { userServareaId, userStaffId, loginUserId, loginUserNm, posNm, corpNm, lastLoginAt, ...rest } = existing;
   await writeJson(statePath, rest);
 }
 

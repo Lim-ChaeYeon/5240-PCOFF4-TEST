@@ -1,8 +1,8 @@
 {
   "summary": {
-    "generatedAt": "2026-02-13T06:28:09.796Z",
-    "total": 8,
-    "passed": 8,
+    "generatedAt": "2026-02-15T06:19:31.483Z",
+    "total": 1,
+    "passed": 1,
     "failed": 0,
     "requiredFlows": [
       "Flow-01",
@@ -15,100 +15,19 @@
       "Flow-08"
     ],
     "coveredFlows": [
+      "Flow-07"
+    ],
+    "uncoveredFlows": [
       "Flow-01",
       "Flow-02",
       "Flow-03",
       "Flow-04",
       "Flow-05",
       "Flow-06",
-      "Flow-07",
       "Flow-08"
-    ],
-    "uncoveredFlows": []
+    ]
   },
   "results": [
-    {
-      "scenario": "login_success",
-      "flowId": "Flow-01",
-      "requirementIds": [
-        "FR-01"
-      ],
-      "expectedLogCodes": [
-        "LOGIN_SUCCESS"
-      ],
-      "success": true,
-      "details": "login success flow simulated",
-      "finishedAt": "2026-02-13T06:28:09.795Z"
-    },
-    {
-      "scenario": "lock_reason_input",
-      "flowId": "Flow-02",
-      "requirementIds": [
-        "FR-01"
-      ],
-      "expectedLogCodes": [
-        "LOCK_TRIGGERED"
-      ],
-      "success": true,
-      "details": "lock + reason input flow simulated",
-      "finishedAt": "2026-02-13T06:28:09.796Z"
-    },
-    {
-      "scenario": "update_success",
-      "flowId": "Flow-03",
-      "requirementIds": [
-        "FR-03"
-      ],
-      "expectedLogCodes": [
-        "UPDATE_FOUND",
-        "UPDATE_DOWNLOADED",
-        "UPDATE_APPLIED"
-      ],
-      "success": true,
-      "details": "silent update flow simulated",
-      "finishedAt": "2026-02-13T06:28:09.796Z"
-    },
-    {
-      "scenario": "update_failure_retry",
-      "flowId": "Flow-04",
-      "requirementIds": [
-        "FR-03"
-      ],
-      "expectedLogCodes": [
-        "UPDATE_FAILED"
-      ],
-      "success": true,
-      "details": "update failure retry flow simulated",
-      "finishedAt": "2026-02-13T06:28:09.796Z"
-    },
-    {
-      "scenario": "password_change_confirm",
-      "flowId": "Flow-05",
-      "requirementIds": [
-        "FR-04"
-      ],
-      "expectedLogCodes": [
-        "PASSWORD_CHANGE_DETECTED",
-        "PASSWORD_CONFIRM_DONE"
-      ],
-      "success": true,
-      "details": "password confirm-only policy simulated",
-      "finishedAt": "2026-02-13T06:28:09.796Z"
-    },
-    {
-      "scenario": "tamper_attempt",
-      "flowId": "Flow-06",
-      "requirementIds": [
-        "FR-07"
-      ],
-      "expectedLogCodes": [
-        "AGENT_TAMPER_DETECTED",
-        "AGENT_RECOVERED"
-      ],
-      "success": true,
-      "details": "tamper detection trigger simulated",
-      "finishedAt": "2026-02-13T06:28:09.796Z"
-    },
     {
       "scenario": "offline_detected",
       "flowId": "Flow-07",
@@ -120,21 +39,8 @@
         "OFFLINE_DETECTED"
       ],
       "success": true,
-      "details": "offline/crash flow simulated",
-      "finishedAt": "2026-02-13T06:28:09.796Z"
-    },
-    {
-      "scenario": "installer_registry_sync",
-      "flowId": "Flow-08",
-      "requirementIds": [
-        "FR-09"
-      ],
-      "expectedLogCodes": [
-        "INSTALLER_REGISTRY_SYNC"
-      ],
-      "success": true,
-      "details": "installer registry sync flow simulated",
-      "finishedAt": "2026-02-13T06:28:09.796Z"
+      "details": "offline/crash flow simulated, OFFLINE_DETECTED and CRASH_DETECTED logged",
+      "finishedAt": "2026-02-15T06:19:31.483Z"
     }
   ]
 }

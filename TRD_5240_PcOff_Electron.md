@@ -63,20 +63,26 @@ Electron 앱은 Main Process와 Renderer Process의 분리된 프로세스 모�
 
 ### 3.1 Renderer → Main (via preload)
 
-* `getAppState()`
-* `triggerLock(reason)`
-* `confirmPasswordChange()`
-* `getTimerState()`
-* `requestUpdateCheck()`
-* `getLogs()`
+* `getAppState()` — 상태 머신 스냅샷
+* `getCurrentUser()` — 로그인 사용자 표시 정보(loginUserNm, posNm, corpNm 등)
+* `hasLogin()` — 로그인 여부
+* `getServareaInfo(userMobileNo)` — 서비스 영역 목록 조회
+* `login(payload)` — 로그인
+* `logout()` — 로그아웃
+* `getWorkTime()` — 근태정보(getPcOffWorkTime)
+* `requestPcExtend(pcOffYmdTime?)` — 임시연장
+* `requestEmergencyUse(reason)` — 긴급사용
+* `requestPcOnOffLog(tmckButnCd, eventName?, reason?)` — PC-ON/PC-OFF
+* `getPasswordChangeState()` — 비밀번호 변경 감지 상태 (FR-04)
+* `confirmPasswordChange()` — 비밀번호 변경 확인 (검증 없음)
+* `requestUpdateCheck()`, `getUpdateStatus()`, `getAppVersion()` — 업데이트 (FR-03)
+* `getGuardStatus()`, `getGuardTamperEvents()`, `verifyIntegrity()` — Agent Guard (FR-07)
 
 ### 3.2 Main → Renderer events
 
-* `onUpdateProgress(percent)`
-* `onUpdateApplied()`
-* `onPolicyAlert(message)`
-* `onAgentGuardWarning(event)`
-* `onNetworkStatusChange()`
+* `onUpdateProgress(data)` — 업데이트 진행률 (FR-03)
+* `onPasswordChangeDetected(data)` — 비밀번호 변경 감지 시 (FR-04)
+* `onTamperDetected(event)` — Agent Guard 탐지 시 (FR-07)
 
 IPC 메시지는 타입과 스키마를 정의하고 검증해야 한다.
 
@@ -87,9 +93,10 @@ IPC 메시지는 타입과 스키마를 정의하고 검증해야 한다.
 ### 4.1 Local Storage Structure
 
 * `config.json`: 설정
-* `state.json`: 상태 정보
+* `state.json`: 상태 정보(로그인 정보 등)
 * `logs/YYYY-MM-DD.jsonl`: 일자별 로그 파일
-* `guard/integrity.json`: 무결성 정보
+* `guard/integrity.json`: Agent Guard 무결성 기준선 (FR-07)
+* `guard/watch-list.json`: (선택) Guard 감시 대상 파일 목록
 * `update/retry-queue.json`: 업데이트 재시도 큐
 
 ### 4.2 Core State Machine (High Level)

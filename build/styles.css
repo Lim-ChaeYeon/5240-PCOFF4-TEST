@@ -49,6 +49,7 @@ body {
 }
 .logo-text-wrap { display: flex; flex-direction: column; line-height: 1.2; }
 .logo-text-wrap span { color: var(--muted); font-size: 12px; }
+.user-display { font-size: 13px; color: var(--muted); margin-right: 8px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state-badge { border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 13px; color: var(--muted); }
 
 .dashboard { align-self: center; max-width: 980px; }
@@ -112,4 +113,24 @@ body {
 .login-error { color: var(--danger); font-size: 13px; margin: 0; min-height: 18px; }
 .login-step .button { margin-top: 8px; }
 .login-step .button.ghost { margin-top: 4px; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center;
+  z-index: 1000; padding: 20px;
+}
+.modal-overlay.hidden { display: none; }
+.modal-box {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px;
+  min-width: 320px; max-width: 90vw;
+}
+.modal-title { margin: 0 0 8px; font-size: 18px; }
+.modal-desc { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+.modal-hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; opacity: 0.8; }
+.modal-input { width: 100%; margin-bottom: 14px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+.version-badge {
+  font-size: 11px; color: var(--muted); background: rgba(255,255,255,0.06);
+  padding: 4px 8px; border-radius: 6px; margin-right: 4px;
+}
 

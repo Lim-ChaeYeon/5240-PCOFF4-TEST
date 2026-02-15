@@ -12,6 +12,10 @@ export interface WorkTimeResponse {
   pcoffEmergencyYesNo?: "YES" | "NO";
   leaveSeatUseYn?: "Y" | "N";
   emergencyUseYesNo?: "YES" | "NO";
+  /** 비밀번호 변경 필요 여부 (서버에서 플래그 제공 시) */
+  pwdChgYn?: "Y" | "N";
+  /** 비밀번호 변경 메시지 */
+  pwdChgMsg?: string;
 }
 
 export interface ApiClientConfig {
@@ -177,4 +181,35 @@ export class PcOffApiClient {
       reason: request.reason
     });
   }
+}
+
+/** FR-08: 에이전트 이벤트 로그 전송 (Ops Observer) */
+export interface AgentEventPayload {
+  events: Array<{
+    timestamp: string;
+    logCode: string;
+    level: string;
+    sessionId: string;
+    deviceId: string;
+    payload?: Record<string, unknown>;
+  }>;
+  deviceId: string;
+  sessionId: string;
+}
+
+/**
+ * 에이전트 이벤트(heartbeat, CRASH_DETECTED, OFFLINE_DETECTED 등)를 서버에 보고.
+ * 서버에 "중지/충돌/통신단절" 기록이 남도록 함.
+ * 엔드포인트: POST /reportAgentEvents.do
+ */
+export async function reportAgentEvents(
+  baseUrl: string,
+  payload: AgentEventPayload
+): Promise<void> {
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/reportAgentEvents.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error(`reportAgentEvents failed: ${res.status}`);
 }

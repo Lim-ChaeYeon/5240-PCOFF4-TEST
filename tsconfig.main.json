@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["app/main/**/*.ts", "app/core/**/*.ts"],
+  "exclude": ["dist", "node_modules", "app/preload", "simulator"]
+}

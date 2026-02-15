@@ -1,22 +1,35 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_NAME, LOG_CODES } from "../core/constants.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// ESM에서 __dirname 대체
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { FeatureStateMachine } from "../core/state-machine.js";
 import { TelemetryLogger } from "../core/telemetry-log.js";
 import { UpdateManager } from "../core/update-manager.js";
 import { OpsObserver } from "../core/ops-observer.js";
+import { AuthPolicy } from "../core/auth-policy.js";
+import { AgentGuard } from "../core/agent-guard.js";
 import { PcOffApiClient, PcOffAuthClient, type WorkTimeResponse } from "../core/api-client.js";
-import { loadRuntimeConfig, getApiBaseUrl, saveLoginState, clearLoginState } from "../core/runtime-config.js";
+import {
+  loadRuntimeConfig,
+  getApiBaseUrl,
+  saveLoginState,
+  clearLoginState,
+  getLoginUserDisplay
+} from "../core/runtime-config.js";
 
 const baseDir = process.cwd();
+let mainWindow: BrowserWindow | null = null;
 const machine = new FeatureStateMachine();
 const logger = new TelemetryLogger(baseDir, machine.getSessionId(), process.platform);
 const updater = new UpdateManager(baseDir, logger);
-const observer = new OpsObserver(logger);
+const observer = new OpsObserver(logger, () => getApiBaseUrl(baseDir));
+const authPolicy = new AuthPolicy(logger);
+const guard = new AgentGuard(baseDir, logger);
 
 function getTodayYmd(): string {
   const now = new Date();
@@ -83,23 +96,45 @@ function createMainWindow(): void {
       preload: preloadPath ?? undefined
     }
   });
+  mainWindow = win;
+  win.on("closed", () => {
+    mainWindow = null;
+  });
   win.loadFile(htmlPath);
 }
 
 app.whenReady().then(async () => {
   app.setName(APP_NAME);
   await logger.write(LOG_CODES.APP_START, "INFO", { platform: process.platform });
-  observer.startHeartbeat();
+  // FR-08: Ops Observer 시작 (heartbeat + 로그 서버 전송)
+  observer.start();
+  // FR-07: Agent Guard 시작 (무결성 감시)
+  await guard.start();
   createMainWindow();
 });
 
-app.on("window-all-closed", () => {
-  observer.stopHeartbeat();
+app.on("window-all-closed", async () => {
+  observer.stop();
+  await guard.stop();
   if (process.platform !== "darwin") app.quit();
 });
 
+// FR-08: 비정상 종료 시 서버에 CRASH_DETECTED 보고
+process.on("uncaughtException", (err) => {
+  void observer.reportCrash(err).then(() => process.exit(1));
+});
+process.on("unhandledRejection", (reason) => {
+  void observer.reportCrash(String(reason)).then(() => process.exit(1));
+});
+
 ipcMain.handle("pcoff:getAppState", async () => machine.getSnapshot());
-ipcMain.handle("pcoff:requestUpdateCheck", async () => updater.checkAndApplySilently());
+ipcMain.handle("pcoff:getCurrentUser", async () => getLoginUserDisplay(baseDir));
+ipcMain.handle("pcoff:requestUpdateCheck", async () => {
+  const status = await updater.checkAndApplySilently();
+  return status;
+});
+ipcMain.handle("pcoff:getUpdateStatus", async () => updater.getStatus());
+ipcMain.handle("pcoff:getAppVersion", async () => updater.getAppVersion());
 
 const LOGIN_PLACEHOLDERS = ["REPLACE_WITH_SERVAREA_ID", "REPLACE_WITH_STAFF_ID"];
 function isRealLoginId(value: string | undefined): boolean {
@@ -160,7 +195,9 @@ ipcMain.handle(
         userServareaId,
         userStaffId,
         loginUserId: res.loginUserId ?? payload.loginUserId,
-        loginUserNm: res.loginUserNm
+        loginUserNm: res.loginUserNm,
+        posNm: res.posNm,
+        corpNm: res.corpNm
       });
       await logger.write("LOGIN_SUCCESS", "INFO", { loginUserId: payload.loginUserId });
       return {
@@ -188,6 +225,18 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
 
   try {
     const data = await api.getPcOffWorkTime();
+    
+    // FR-04: 비밀번호 변경 감지
+    if (data.pwdChgYn === "Y") {
+      await authPolicy.onPasswordChangeDetected("getPcOffWorkTime", data.pwdChgMsg);
+      // Renderer에 비밀번호 변경 이벤트 전송
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("pcoff:password-change-detected", {
+          message: data.pwdChgMsg || "비밀번호가 변경되었습니다. 확인 버튼을 눌러주세요.",
+        });
+      }
+    }
+    
     return { source: "api", data };
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "getPcOffWorkTime", error: String(error) });
@@ -234,6 +283,9 @@ ipcMain.handle(
         reason: payload.reason,
         emergencyYn: "N"
       });
+      if (payload.tmckButnCd === "IN" && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.minimize();
+      }
       return { source: "api", success: true, data };
     } catch (error) {
       await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callCmmPcOnOffLogPrc", error: String(error) });
@@ -241,3 +293,29 @@ ipcMain.handle(
     }
   }
 );
+
+// FR-04: 비밀번호 변경 확인 (검증 없이 확인만)
+ipcMain.handle("pcoff:getPasswordChangeState", async () => {
+  return authPolicy.getPasswordChangeState();
+});
+
+ipcMain.handle("pcoff:confirmPasswordChange", async () => {
+  const userInfo = await getLoginUserDisplay(baseDir);
+  const userId = userInfo?.loginUserId || "unknown";
+  await authPolicy.confirmPasswordChange(userId);
+  return { success: true };
+});
+
+// FR-07: Agent Guard IPC
+ipcMain.handle("pcoff:getGuardStatus", async () => {
+  return guard.getStatus();
+});
+
+ipcMain.handle("pcoff:getGuardTamperEvents", async () => {
+  return guard.getTamperEvents();
+});
+
+ipcMain.handle("pcoff:verifyIntegrity", async () => {
+  const valid = await guard.verifyIntegrity();
+  return { valid, status: guard.getStatus() };
+});

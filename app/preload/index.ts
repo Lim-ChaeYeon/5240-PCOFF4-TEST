@@ -31,6 +31,36 @@ export interface TamperEvent {
   recoveryStrategy?: string;
 }
 
+export type OperationMode = "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE" | "EMERGENCY_RELEASE";
+
+export interface TrayOperationInfo {
+  reflectedAttendance: {
+    basedAt: string | null;
+    appliedPolicy: string;
+  };
+  myAttendance: {
+    workStartTime?: string;
+    workEndTime?: string;
+    pcOnYn?: string;
+    pcExCount?: number;
+    pcExMaxCount?: number;
+    pcExTime?: number;
+    pcoffEmergencyYesNo?: string;
+  };
+  versionInfo: {
+    appVersion: string;
+    coreVersion: string;
+    lastUpdatedAt: string;
+  };
+  mode: OperationMode;
+  user?: {
+    loginUserNm?: string;
+    loginUserId?: string;
+    posNm?: string;
+    corpNm?: string;
+  };
+}
+
 const api = {
   getAppState: () => ipcRenderer.invoke("pcoff:getAppState") as Promise<{ state: string }>,
   getCurrentUser: () =>
@@ -117,7 +147,31 @@ const api = {
     const handler = (_event: IpcRendererEvent, data: TamperEvent) => callback(data);
     ipcRenderer.on("pcoff:tamper-detected", handler);
     return () => ipcRenderer.removeListener("pcoff:tamper-detected", handler);
-  }
+  },
+
+  // 트레이 작동정보 조회 (에이전트 정보 화면용)
+  getTrayOperationInfo: () =>
+    ipcRenderer.invoke("pcoff:getTrayOperationInfo") as Promise<TrayOperationInfo>,
+  refreshMyAttendance: () =>
+    ipcRenderer.invoke("pcoff:refreshMyAttendance") as Promise<Record<string, unknown>>,
+  getOperationMode: () =>
+    ipcRenderer.invoke("pcoff:getOperationMode") as Promise<{ mode: OperationMode }>,
+  onModeChanged: (callback: (data: { mode: OperationMode }) => void) => {
+    const handler = (_event: IpcRendererEvent, data: { mode: OperationMode }) => callback(data);
+    ipcRenderer.on("pcoff:mode-changed", handler);
+    return () => ipcRenderer.removeListener("pcoff:mode-changed", handler);
+  },
+
+  // 창 제어
+  /** 사용시간 종료(pcOnYn=N)일 때만 잠금화면 열기. 로그인 성공 후 호출 */
+  checkLockAndShow: () =>
+    ipcRenderer.invoke("pcoff:checkLockAndShow") as Promise<{ lockOpened: boolean }>,
+  openLockWindow: () => ipcRenderer.invoke("pcoff:openLockWindow") as Promise<{ success: boolean }>,
+  closeCurrentWindow: () => ipcRenderer.invoke("pcoff:closeCurrentWindow") as Promise<{ success: boolean }>,
+
+  // 로그 이벤트 (선택적)
+  logEvent: (code: string, payload: Record<string, unknown>) =>
+    ipcRenderer.invoke("pcoff:logEvent", { code, payload }) as Promise<void>
 };
 
 contextBridge.exposeInMainWorld("pcoffApi", api);

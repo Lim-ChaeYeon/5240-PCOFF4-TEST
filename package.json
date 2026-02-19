@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.preload.json",
-    "postbuild": "node ./scripts/sync-static.mjs",
+    "postbuild": "node ./scripts/sync-static.mjs && node ./scripts/create-tray-icon.mjs",
     "preview:web": "npx serve -s build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.preload.json",
     "simulator": "tsx simulator/cli.ts run --scenario update_success",

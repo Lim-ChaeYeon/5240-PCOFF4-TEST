@@ -46,10 +46,11 @@ npm run dist:win
 | 사용자 | 받을 파일 | 비고 |
 |--------|-----------|------|
 | **Windows** | `5240 PcOff Agent Setup x.x.x.exe` | 일반 PC(Intel/AMD 64비트). 더블클릭 후 설치. |
-| **Mac** | `5240 PcOff Agent-x.x.x.dmg` (또는 `.zip`) | Apple Silicon·Intel 맥 모두. .dmg 열어서 앱을 Applications로 드래그. |
+| **Mac** | `5240 PcOff Agent-x.x.x.dmg` (또는 `.zip`) | Apple Silicon·Intel 맥 모두. .dmg 열어서 앱을 Applications로 드래그. **서명·notarization 없으면** 첫 실행 시 Gatekeeper 경고가 나옵니다. → [맥 설치 파일 실행 안 될 때](docs/맥_설치_가이드.md) 참고. |
 
 - 위 파일은 **Releases** 탭에서 해당 버전(태그)을 누르면 내려받을 수 있습니다.
 - 설치 후 앱은 GitHub Release를 보고 **자동 업데이트**합니다.
+- **Mac**: 현재 CI 빌드는 **Apple 코드 서명·notarization을 하지 않습니다.** 테스트/내부용으로는 아래 가이드대로 "열기" 허용 후 사용하고, 정식 배포 시에는 Apple Developer 계정으로 서명·notarization을 설정해야 합니다.
 
 ---
 
@@ -200,6 +201,9 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **Ops Observer (FR-08)**: heartbeat·로그 배치 서버 전송(`/reportAgentEvents.do`), 크래시/오프라인 보고 ✅
 - **에이전트 UI·잠금화면 분리**: 트레이 작동정보(`main.html`), 잠금화면(`lock.html`), 로그인(`index.html`) — 단일 창에서 전환, 시스템 트레이 메뉴, 운영 모드 관리 ✅
 - **트레이 아이콘**: `scripts/create-tray-icon.mjs`로 16×16 PNG 생성(postbuild), macOS `setTemplateImage` 적용. 파일 없을 때 Base64 fallback.
+- **CI·릴리스 (패키징)**: 태그 푸시(v*) 시 GitHub Actions로 Windows x64·Mac 빌드 후 GitHub Release 업로드. Windows → .exe, Mac → .dmg/.zip. ✅
+- **자동 업데이트 (GitHub)**: `publish.provider: "github"` — 설치된 앱이 GitHub Release에서 새 버전 확인·자동 적용. ✅
+- **푸시 용량 초과 해결**: `release/` .gitignore, 히스토리에서 제거 방법은 [docs/깃_푸시_용량초과_해결.md](docs/깃_푸시_용량초과_해결.md) 참고. ✅
 
 ---
 
@@ -211,7 +215,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 | ~~-~~ | ~~잠금화면·에이전트 창 닫기 방지~~ | ~~창 X버튼/닫기 차단 (FR-07·FR-18 보완)~~ **완료** ✅ |
 | ~~1~~ | ~~이석 감지·해제 플로우~~ | Idle/절전 기반 이석 감지, 사유 입력, 휴게시간 예외 (FR-11, Flow-09) **완료** ✅ |
 | 2 | 로그 코드 전수 반영 | logcode.md와 필수 이벤트 매핑 (PRD §7) |
-| 3 | 패키징·플랫폼 검증 | Windows installer, macOS pkg/dmg, 코드 서명 (NFR-01, DoD) |
+| 3 | 패키징·플랫폼 검증 | Windows/Mac CI 빌드·Release **완료** ✅. 코드 서명·notarization 별도 (NFR-01, DoD) |
 | 4 | 인스톨/언인스톨 정책 | 설치자 식별, 무결성 기준선, 삭제 방지 (FR-19) |
 | 5 | 프로세스 Kill 통제 | 사용자 Kill 차단, OTP 승인 (FR-18) |
 | 6 | 오프라인 복구·잠금 | 30분 유예, 오프라인 잠금, 복구 시도 (FR-17, Flow-13) |
@@ -237,4 +241,6 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - [PC_OFF_AGENT_API.md](PC_OFF_AGENT_API.md) — PCOFF API 규격
 - [docs/다음_개발_진행_사항.md](docs/다음_개발_진행_사항.md) — 완료 항목·다음 작업 정리
 - [docs/개발_이력_리포트.md](docs/개발_이력_리포트.md) — 개발 이력·이슈 해결 기록
+- [docs/깃_푸시_용량초과_해결.md](docs/깃_푸시_용량초과_해결.md) — release/ 푸시 거부 시 히스토리 정리 방법
+- [docs/맥_설치_가이드.md](docs/맥_설치_가이드.md) — Mac 설치 파일 "열 수 없음" / Gatekeeper 경고 시 실행 방법
 - [docs/operations/logcode.md](docs/operations/logcode.md) — 로그 코드 매핑

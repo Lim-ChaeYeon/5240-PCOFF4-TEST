@@ -20,6 +20,70 @@ npm start
 
 ---
 
+## Windows 설치 파일 빌드
+
+NSIS 기반 Windows 설치 파일(.exe)을 만들 수 있습니다.
+
+```bash
+npm run build
+npm run dist:win
+```
+
+- **출력 위치**: `release/` 폴더  
+  - `5240 PcOff Agent Setup 0.1.0.exe` — 설치 프로그램  
+  - `latest.yml` — 자동 업데이트용 메타데이터
+- **아키텍처**:  
+  - Mac에서 실행 시 **Windows ARM64**용이 생성됩니다 (Windows on ARM 기기용).  
+  - 일반 PC(Intel/AMD 64비트)용이 필요하면 **Windows PC**에서 `npm run dist:win:x64`를 실행하거나, CI(예: GitHub Actions, AppVeyor)에서 `electron-builder --win --x64`로 빌드하세요.
+- **설치 옵션**: 설치 경로 변경 불가, 바탕화면 바로가기 생성, 설치 후 실행(perMachine 설치).
+
+---
+
+## CI · 릴리스 자동화
+
+**태그를 푸시하면** GitHub Actions가 Windows x64 설치 파일을 빌드하고 **GitHub Release**에 올립니다.
+
+### 사용 방법
+
+일반적인 흐름: **로컬 LKJ_DEV**에서 작업 → **원격 LKJ_DEV**로 푸시 → **main**으로 PR 머지.
+
+**릴리스(설치 파일 자동 빌드)**를 만들 때:
+
+1. **버전 올리기**  
+   `package.json`의 `version`을 수정합니다 (예: `0.1.0` → `0.1.1`).
+2. **커밋 후 푸시**
+   - LKJ_DEV에서 작업한 경우:
+     ```bash
+     git add package.json
+     git commit -m "chore: bump version to 0.1.1"
+     git push origin LKJ_DEV
+     ```
+   - main으로 PR 머지한 뒤, **릴리스용 태그**는 보통 main에서 붙입니다:
+     ```bash
+     git checkout main
+     git pull origin main
+     git tag v0.1.1
+     git push origin v0.1.1
+     ```
+   - LKJ_DEV에서 바로 태그만 푸시해도 됩니다: `git tag v0.1.1` 후 `git push origin v0.1.1`
+3. **Actions 탭**에서 `release` 워크플로우가 돌고, 완료되면 **Releases**에 `.exe`, `latest.yml`, `.blockmap`이 올라갑니다.
+
+### 워크플로우 동작
+
+- **트리거**: `v*` 태그 푸시 (예: `v0.1.0`, `v0.1.1`)
+- **빌드**: `windows-latest`에서 `npm ci` → `npm run build` → `electron-builder --win --x64`
+- **결과**: 해당 태그로 GitHub Release 생성, Windows 설치 파일·메타데이터 업로드
+
+설정 파일: [.github/workflows/release.yml](.github/workflows/release.yml)
+
+### 자동 업데이트 연동
+
+- 현재 앱은 **업데이트 서버**를 `package.json`의 `publish.url`(예: `https://update.tigris5240.com/pcoff-agent`)로 보고 있습니다.
+- **GitHub Release만 쓰려면**: `package.json`의 `build.publish`를 `{ "provider": "github" }`로 바꾸고, `repository` 필드에 `"owner/저장소이름"`을 넣으면, 설치된 앱이 GitHub Release에서 새 버전을 찾아 자동 업데이트합니다.
+- **기존 URL을 유지하려면**: CI로 만든 Release에서 `.exe`와 `latest.yml`을 다운로드한 뒤, 직접 업데이트 서버에 올리면 됩니다.
+
+---
+
 ## 테스트 방법
 
 ### 비개발자용 (간단 요약)

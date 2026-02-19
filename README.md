@@ -63,12 +63,15 @@ npm run simulator:all      # Flow-01~08 전체 시나리오 실행
 
 결과는 `artifacts/parity-report.json`, `artifacts/parity-summary.md`에 기록됩니다.
 
-#### 4. 개발자용 로그아웃 핫키
+#### 4. 전역 단축키 (맥에서 메뉴 막대 아이콘이 안 보여도 사용 가능)
 
-- **macOS**: `Cmd + Shift + L`
-- **Windows**: `Ctrl + Shift + L`  
+| 동작 | Windows | Mac |
+|------|---------|-----|
+| 로그아웃 | Ctrl + Shift + L | Cmd + Shift + L |
+| PCOFF 작동정보 창 | Ctrl + Shift + I | Cmd + Shift + I |
+| 잠금화면 창 | Ctrl + Shift + K | Cmd + Shift + K |
 
-메인 화면에서 위 조합 입력 시 로그인 정보 삭제 후 로그인 화면으로 전환됩니다. (상세: [docs/로그인_테스트.md §7](docs/로그인_테스트.md))
+앱이 실행 중이면 **어디서든** 위 조합으로 동작합니다. (상세: [docs/로그인_테스트.md §7](docs/로그인_테스트.md), [docs/테스트_가이드_비개발자.md §4.6](docs/테스트_가이드_비개발자.md))
 
 ---
 
@@ -101,9 +104,10 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 
 ## 이미 구현된 것
 
-- **로그인**: 2단계(전화번호 → 서비스영역 선택 → 계정·비밀번호), `state.json` 저장, 에러 메시지 디코딩
-- **로그아웃**: 개발자용 핫키(Cmd+Shift+L / Ctrl+Shift+L)
-- **메인(잠금) 화면**: 근태정보 조회, 임시연장/긴급사용/PC-ON/PC-OFF 버튼, screenType·pcOnYn·긴급사용 정책 반영
+- **로그인**: 2단계(전화번호 → 서비스영역 선택 → 계정·비밀번호), `state.json` 저장, 에러 메시지 디코딩. **Enter 키**로 다음/로그인 가능.
+- **단일 창(mainWindow)**: 작동정보·로그인·잠금화면을 **한 창에서 전환** (새 창 없이 동일 창에서 화면만 변경).
+- **로그아웃·작동정보·잠금화면**: 전역 핫키(Cmd+Shift+L/I/K, Ctrl+Shift+L/I/K). 로그인 후 잠금 필요 시 같은 창에서 잠금화면으로 전환.
+- **메인(잠금) 화면**: 근태정보 조회, 임시연장/긴급사용/PC-ON/PC-OFF 버튼. **PC-ON**·**긴급사용** 성공 시 같은 창에서 **작동정보 화면**으로 전환.
 - **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callCmmPcOnOffLogPrc
 - **시뮬레이터·CI**: Flow-01~08 시나리오, parity-report.json, parity-summary.md, CI 아티팩트
 - **로깅**: JSONL, TelemetryLogger, APP_START, LOGIN_SUCCESS/FAIL, UPDATE_*, AGENT_* 등 이벤트 (logcode.md 참고)
@@ -111,6 +115,8 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **비밀번호 변경 확인 (FR-04)**: 서버 `pwdChgYn=Y` 감지 시 확인 전용 모달, 검증/재로그인 없음 ✅
 - **Agent Guard (FR-07)**: 무결성 체크(SHA-256), 파일 감시, 탐지 시 로그·복구 트리거, IPC 연동 ✅
 - **Ops Observer (FR-08)**: heartbeat·로그 배치 서버 전송(`/reportAgentEvents.do`), 크래시/오프라인 보고 ✅
+- **에이전트 UI·잠금화면 분리**: 트레이 작동정보(`main.html`), 잠금화면(`lock.html`), 로그인(`index.html`) — 단일 창에서 전환, 시스템 트레이 메뉴, 운영 모드 관리 ✅
+- **트레이 아이콘**: `scripts/create-tray-icon.mjs`로 16×16 PNG 생성(postbuild), macOS `setTemplateImage` 적용. 파일 없을 때 Base64 fallback.
 
 ---
 
@@ -125,7 +131,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 | 5 | 긴급해제 (비밀번호) | 비밀번호 검증, 시도제한, 3시간 만료 (FR-15, Flow-12) |
 | 6 | 시업/종업 화면 로직 | 종업화면/시업화면 결정, PC-ON 예외, 자율출근 (FR-13, Flow-11) |
 | 7 | 고객사 설정 반영 | 문구·이미지·로고·긴급해제·이석해제 비밀번호 (FR-14) |
-| 8 | 트레이 작동정보 | 근태·버전·모드 표시, 실시간 갱신 (FR-16, Flow-14) |
+| ~~8~~ | ~~트레이 작동정보~~ | ~~근태·버전·모드 표시, 실시간 갱신 (FR-16, Flow-14)~~ **완료** |
 | 9 | 프로세스 Kill 통제 | 사용자 Kill 차단, OTP 승인 (FR-18) |
 | 10 | 인스톨/언인스톨 정책 | 설치자 식별, 무결성 기준선, 삭제 방지 (FR-19) |
 | 11 | 로그 코드 전수 반영 | logcode.md와 필수 이벤트 매핑 (PRD §7) |

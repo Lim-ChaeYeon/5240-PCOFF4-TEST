@@ -382,6 +382,13 @@ function setupLoginFlow() {
   let servareaList = [];
   let userMobileNo = "";
 
+  // 전화번호 입력 후 엔터 → 다음
+  phoneInput?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    document.getElementById("login-next")?.click();
+  });
+
   document.getElementById("login-next")?.addEventListener("click", async () => {
     userMobileNo = (phoneInput?.value ?? "").trim().replace(/-/g, "");
     step1Error.textContent = "";
@@ -436,6 +443,16 @@ function setupLoginFlow() {
     step1?.classList.remove("hidden");
   });
 
+  // 서비스 영역·ID·비밀번호 입력 후 엔터 → 로그인
+  const submitOnEnter = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    document.getElementById("login-submit")?.click();
+  };
+  servareaSelect?.addEventListener("keydown", submitOnEnter);
+  useridInput?.addEventListener("keydown", submitOnEnter);
+  passwordInput?.addEventListener("keydown", submitOnEnter);
+
   document.getElementById("login-submit")?.addEventListener("click", async () => {
     const loginServareaId = servareaSelect?.value ?? "";
     const loginUserId = (useridInput?.value ?? "").trim();
@@ -457,6 +474,15 @@ function setupLoginFlow() {
       return;
     }
     showToast(res.loginUserNm ? `${res.loginUserNm}님 로그인됨` : "로그인 성공");
+    
+    // 로그인 성공 후: 잠금 필요 시 같은 창에서 잠금화면으로 전환, 아니면 창 닫기
+    if (window.pcoffApi?.checkLockAndShow && window.pcoffApi?.closeCurrentWindow) {
+      const { lockOpened } = await window.pcoffApi.checkLockAndShow();
+      if (!lockOpened) await window.pcoffApi.closeCurrentWindow();
+      return;
+    }
+    
+    // Fallback: 기존 방식 (단일 창 모드)
     showView("main");
     bootstrap();
   });

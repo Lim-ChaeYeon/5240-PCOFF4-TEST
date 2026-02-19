@@ -173,9 +173,14 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
 
 /**
  * 트레이에서 열리는 에이전트 정보 화면 (main.html)
- * 버튼 없이 정보 조회만 가능
+ * 버튼 없이 정보 조회만 가능.
+ * 화면 오픈 시 잠금 필요(종업 시간 경과 등)면 잠금화면을 먼저 표시한다.
  */
-function createTrayInfoWindow(): void {
+async function createTrayInfoWindow(): Promise<void> {
+  // 종업 시간 경과 등으로 잠금 필요 시 작동정보 대신 잠금화면 표시
+  const lockShown = await checkLockAndShowLockWindow(mainWindow ?? undefined);
+  if (lockShown) return;
+
   const htmlPath = getRendererPath("main.html");
   console.info("[PCOFF] Opening tray info window:", htmlPath);
 
@@ -421,7 +426,7 @@ function setOperationMode(mode: OperationMode): void {
   }
 }
 
-/** 서버 근태 기준 잠금 필요 여부: pcOnYn === "N" 이면 사용시간 종료(잠금) */
+/** 서버 근태 기준 잠금 필요 여부: getPcOffWorkTime 응답의 pcOnYn === "N" 이면 사용시간 종료(잠금). 설계: 서버가 조정해 회신한 값으로만 판단. */
 async function isLockRequired(): Promise<boolean> {
   const api = await getApiClient();
   if (!api) {
@@ -804,8 +809,13 @@ ipcMain.handle("pcoff:requestPcExtend", async (_event, payload: { pcOffYmdTime?:
   try {
     const pcOffYmdTime = payload.pcOffYmdTime ?? buildMockWorkTime().pcOffYmdTime ?? "";
     const data = await api.callPcOffTempDelay(pcOffYmdTime);
-    await logger.write("LOCK_TRIGGERED", "INFO", { action: "pc_extend", pcOffYmdTime });
-    return { source: "api", success: true, data };
+    await logger.write("UNLOCK_TRIGGERED", "INFO", { action: "pc_extend", pcOffYmdTime });
+    setOperationMode("TEMP_EXTEND");
+    const workTime = await api.getPcOffWorkTime();
+    lastWorkTimeData = workTime as unknown as Record<string, unknown>;
+    lastWorkTimeFetchedAt = new Date().toISOString();
+    createTrayInfoWindow();
+    return { source: "api", success: true, data: workTime };
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffTempDelay", error: String(error) });
     return { source: "fallback", success: false, error: String(error) };

@@ -49,7 +49,7 @@ npm run dist:win
 | **Mac** | `5240 PcOff Agent-x.x.x.dmg` (또는 `.zip`) | Apple Silicon·Intel 맥 모두. .dmg 열어서 앱을 Applications로 드래그. **서명·notarization 없으면** 첫 실행 시 Gatekeeper 경고가 나옵니다. → [맥 설치 파일 실행 안 될 때](docs/맥_설치_가이드.md) 참고. |
 
 - 위 파일은 **Releases** 탭에서 해당 버전(태그)을 누르면 내려받을 수 있습니다.
-- 설치 후 앱은 GitHub Release를 보고 **자동 업데이트**합니다.
+- 설치 후 앱은 GitHub Release를 보고 **업데이트**합니다. (앱 안 **「업데이트 확인」** 버튼으로 확인 → 다운로드 → 앱 종료 시 적용. 자세한 흐름은 [docs/업데이트_가이드_사용자.md](docs/업데이트_가이드_사용자.md) 참고.)
 - **Mac**: 현재 CI 빌드는 **Apple 코드 서명·notarization을 하지 않습니다.** 테스트/내부용으로는 아래 가이드대로 "열기" 허용 후 사용하고, 정식 배포 시에는 Apple Developer 계정으로 서명·notarization을 설정해야 합니다.
 
 ---
@@ -243,4 +243,5 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - [docs/개발_이력_리포트.md](docs/개발_이력_리포트.md) — 개발 이력·이슈 해결 기록
 - [docs/깃_푸시_용량초과_해결.md](docs/깃_푸시_용량초과_해결.md) — release/ 푸시 거부 시 히스토리 정리 방법
 - [docs/맥_설치_가이드.md](docs/맥_설치_가이드.md) — Mac 설치 파일 "열 수 없음" / Gatekeeper 경고 시 실행 방법
+- [docs/업데이트_가이드_사용자.md](docs/업데이트_가이드_사용자.md) — 이미 설치한 사용자용 업데이트 확인·적용 방법
 - [docs/operations/logcode.md](docs/operations/logcode.md) — 로그 코드 매핑

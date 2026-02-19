@@ -96,14 +96,23 @@ jobs:
           path: mac
         continue-on-error: true
 
-      - name: Create GitHub Release
+      - name: Remove debug-only files
+        run: |
+          rm -f win-x64/builder-debug.yml mac/builder-debug.yml 2>/dev/null || true
+
+      - name: Create GitHub Release (essential files only)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           draft: false
           files: |
-            win-x64/**/*
-            mac/**/*
+            win-x64/*.exe
+            win-x64/*.yml
+            win-x64/*.blockmap
+            mac/*.dmg
+            mac/*.zip
+            mac/*.yml
+            mac/*.blockmap
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -39,9 +39,23 @@ npm run dist:win
 
 ---
 
+## 사용자별 설치 파일 (배포 시)
+
+태그 푸시 시 CI가 **Windows**와 **Mac** 설치 파일을 모두 빌드해 GitHub Release에 올립니다.
+
+| 사용자 | 받을 파일 | 비고 |
+|--------|-----------|------|
+| **Windows** | `5240 PcOff Agent Setup x.x.x.exe` | 일반 PC(Intel/AMD 64비트). 더블클릭 후 설치. |
+| **Mac** | `5240 PcOff Agent-x.x.x.dmg` (또는 `.zip`) | Apple Silicon·Intel 맥 모두. .dmg 열어서 앱을 Applications로 드래그. |
+
+- 위 파일은 **Releases** 탭에서 해당 버전(태그)을 누르면 내려받을 수 있습니다.
+- 설치 후 앱은 GitHub Release를 보고 **자동 업데이트**합니다.
+
+---
+
 ## CI · 릴리스 자동화
 
-**태그를 푸시하면** GitHub Actions가 Windows x64 설치 파일을 빌드하고 **GitHub Release**에 올립니다.
+**태그를 푸시하면** GitHub Actions가 Windows x64·Mac 설치 파일을 빌드하고 **GitHub Release**에 올립니다.
 
 ### 사용 방법
 
@@ -71,8 +85,8 @@ npm run dist:win
 ### 워크플로우 동작
 
 - **트리거**: `v*` 태그 푸시 (예: `v0.1.0`, `v0.1.1`)
-- **빌드**: `windows-latest`에서 `npm ci` → `npm run build` → `electron-builder --win --x64`
-- **결과**: 해당 태그로 GitHub Release 생성, Windows 설치 파일·메타데이터 업로드
+- **빌드**: Windows x64(`windows-latest`) + Mac(`macos-latest`) 각각 빌드
+- **결과**: 해당 태그로 GitHub Release 생성, `.exe`(Windows)·`.dmg`/`.zip`(Mac)·메타데이터 업로드
 
 설정 파일: [.github/workflows/release.yml](.github/workflows/release.yml)
 

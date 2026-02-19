@@ -31,7 +31,8 @@ npm run dist:win
 
 - **출력 위치**: `release/` 폴더  
   - `5240 PcOff Agent Setup 0.1.0.exe` — 설치 프로그램  
-  - `latest.yml` — 자동 업데이트용 메타데이터
+  - `latest.yml` — 자동 업데이트용 메타데이터  
+- **주의**: `release/`는 `.gitignore`에 있어 커밋하지 마세요. 예전에 커밋돼 푸시가 100MB 제한으로 거부되면 [docs/깃_푸시_용량초과_해결.md](docs/깃_푸시_용량초과_해결.md)를 참고하세요.
 - **아키텍처**:  
   - Mac에서 실행 시 **Windows ARM64**용이 생성됩니다 (Windows on ARM 기기용).  
   - 일반 PC(Intel/AMD 64비트)용이 필요하면 **Windows PC**에서 `npm run dist:win:x64`를 실행하거나, CI(예: GitHub Actions, AppVeyor)에서 `electron-builder --win --x64`로 빌드하세요.

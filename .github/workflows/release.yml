@@ -38,10 +38,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: win-x64
-          path: |
-            release/*.exe
-            release/*.yml
-            release/*.blockmap
+          path: release/
 
   build-mac:
     runs-on: macos-latest
@@ -89,6 +86,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: win-x64
+          path: win-x64
+        continue-on-error: true
 
       - name: Download Mac artifact (optional)
         uses: actions/download-artifact@v4
@@ -104,7 +103,7 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           files: |
-            win-x64/*
-            mac/*
+            win-x64/**/*
+            mac/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

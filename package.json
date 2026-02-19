@@ -1,8 +1,12 @@
 {
   "name": "pcoff-electron-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "5240 PcOff Agent Electron scaffold",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LeeKeonJong/PCOFF_TEST.git"
+  },
   "main": "dist/app/main/index.js",
   "type": "module",
   "scripts": {
@@ -72,8 +76,7 @@
       "runAfterFinish": true
     },
     "publish": {
-      "provider": "generic",
-      "url": "https://update.tigris5240.com/pcoff-agent"
+      "provider": "github"
     }
   }
 }

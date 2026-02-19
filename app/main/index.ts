@@ -1,4 +1,6 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, globalShortcut } from "electron";
+import type { LeaveSeatDetectedReason } from "../core/leave-seat-detector.js";
+import { LeaveSeatDetector } from "../core/leave-seat-detector.js";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +44,11 @@ let currentMode: OperationMode = "NORMAL";
 let lastWorkTimeData: Record<string, unknown> = {};
 let lastWorkTimeFetchedAt: string | null = null;
 
+/** 로컬 이석 감지(유휴/절전)로 잠금된 경우: 감지 시각·사유. PC-ON 해제 시 클리어 */
+let localLeaveSeatDetectedAt: Date | null = null;
+let localLeaveSeatReason: LeaveSeatDetectedReason | null = null;
+const leaveSeatDetector = new LeaveSeatDetector();
+
 const machine = new FeatureStateMachine();
 const logger = new TelemetryLogger(baseDir, machine.getSessionId(), process.platform);
 const updater = new UpdateManager(baseDir, logger);
@@ -55,6 +62,28 @@ function getTodayYmd(): string {
   const m = String(now.getMonth() + 1).padStart(2, "0");
   const d = String(now.getDate()).padStart(2, "0");
   return `${y}${m}${d}`;
+}
+
+/** Date → YYYYMMDDHHmm (이석 감지 시각 등) */
+function formatYmdHm(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${y}${m}${d}${h}${min}`;
+}
+
+/** 터미널에 설정/로드된 값 출력 (디버깅·확인용) */
+function logLoadedConfig(label: string, payload: Record<string, unknown>): void {
+  console.log("[PCOFF] 설정값:", label, JSON.stringify(payload, null, 2));
+}
+
+/** API 응답이 "YES"/"NO" 또는 "Y"/"N" 둘 다 올 수 있음 → 이석 정책은 "Y"|"N"만 사용 */
+function normalizeLeaveSeatUseYn(value: unknown): "Y" | "N" {
+  const v = String(value ?? "").toUpperCase();
+  if (v === "Y" || v === "YES") return "Y";
+  return "N";
 }
 
 function buildMockWorkTime(): WorkTimeResponse {
@@ -237,6 +266,24 @@ function showLockInWindow(win: BrowserWindow): void {
   win.focus();
 }
 
+/** 로컬 이석 감지(유휴/절전) 시 잠금화면 표시 */
+function showLockForLocalLeaveSeat(detectedAt: Date, reason: LeaveSeatDetectedReason): void {
+  localLeaveSeatDetectedAt = detectedAt;
+  localLeaveSeatReason = reason;
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showLockInWindow(mainWindow);
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    createLockWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  }
+}
+
 /** 전역 핫키용 로그아웃: 로그인 정보 삭제 후 로그인 창 전환 */
 async function doGlobalLogout(): Promise<void> {
   await clearLoginState(baseDir);
@@ -384,6 +431,22 @@ async function isLockRequired(): Promise<boolean> {
     const data = await api.getPcOffWorkTime();
     lastWorkTimeData = data as unknown as Record<string, unknown>;
     lastWorkTimeFetchedAt = new Date().toISOString();
+    leaveSeatDetector.updatePolicy({
+      leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
+      leaveSeatTimeMinutes: Number(data.leaveSeatTime ?? 0) || 0
+    });
+    const wt = data as Record<string, unknown>;
+    logLoadedConfig("근태정보 (getPcOffWorkTime)", {
+      pcOnYn: data.pcOnYn,
+      screenType: wt.screenType,
+      pcOnYmdTime: data.pcOnYmdTime,
+      pcOffYmdTime: data.pcOffYmdTime,
+      leaveSeatUseYn: data.leaveSeatUseYn,
+      leaveSeatTime: data.leaveSeatTime,
+      leaveSeatReasonYn: data.leaveSeatReasonYn,
+      leaveSeatReasonManYn: data.leaveSeatReasonManYn,
+      pcoffEmergencyYesNo: data.pcoffEmergencyYesNo
+    });
     return data.pcOnYn === "N";
   } catch {
     return false;
@@ -486,15 +549,54 @@ app.whenReady().then(async () => {
     config?.userServareaId && config?.userStaffId &&
     isRealLoginId(config.userServareaId) && isRealLoginId(config.userStaffId)
   );
-  
+
+  logLoadedConfig("런타임 설정 (config/state)", {
+    apiBaseUrl: config?.apiBaseUrl ?? "(없음)",
+    userServareaId: config?.userServareaId ?? "(없음)",
+    userStaffId: config?.userStaffId ?? "(없음)",
+    hasLogin
+  });
   if (hasLogin) {
-    // 사용시간 종료(pcOnYn=N)일 때만 잠금화면 표시
+    const userDisplay = await getLoginUserDisplay(baseDir);
+    logLoadedConfig("로그인 사용자", {
+      loginUserId: userDisplay?.loginUserId ?? "(없음)",
+      loginUserNm: userDisplay?.loginUserNm ?? "(없음)",
+      posNm: userDisplay?.posNm ?? "(없음)",
+      corpNm: userDisplay?.corpNm ?? "(없음)"
+    });
+  }
+
+  if (hasLogin) {
+    startLockCheckInterval();
+
+    leaveSeatDetector.start({
+      isLeaveSeatActive: () => localLeaveSeatDetectedAt !== null,
+      onIdleDetected: (detectedAt, idleSeconds) => {
+        void logger.write(LOG_CODES.LEAVE_SEAT_IDLE_DETECTED, "INFO", {
+          detectedAt: detectedAt.toISOString(),
+          idleSeconds,
+          leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
+        });
+        showLockForLocalLeaveSeat(detectedAt, "INACTIVITY");
+      },
+      onSleepDetected: (detectedAt, sleepElapsedSeconds) => {
+        void logger.write(LOG_CODES.LEAVE_SEAT_SLEEP_DETECTED, "INFO", {
+          detectedAt: detectedAt.toISOString(),
+          sleepElapsedSeconds,
+          leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
+        });
+        showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED");
+      },
+      onSleepEntered: () => void logger.write(LOG_CODES.SLEEP_ENTERED, "INFO", {}),
+      onSleepResumed: () => void logger.write(LOG_CODES.SLEEP_RESUMED, "INFO", {})
+    });
+    leaveSeatDetector.updatePolicy({
+      leaveSeatUseYn: normalizeLeaveSeatUseYn(lastWorkTimeData?.leaveSeatUseYn),
+      leaveSeatTimeMinutes: Number(lastWorkTimeData?.leaveSeatTime ?? 0) || 0
+    });
+
     const lockOpened = await checkLockAndShowLockWindow();
-    startLockCheckInterval(); // 주기 검사로 사용시간 종료 시 잠금화면 자동 오픈
-    // 잠금이 아니면 에이전트 화면을 먼저 열어서 사용자가 바로 정보를 볼 수 있게 함
-    if (!lockOpened) {
-      createTrayInfoWindow();
-    }
+    if (!lockOpened) createTrayInfoWindow();
   } else {
     // 로그인 필요: 로그인 창 표시
     createLoginWindow();
@@ -521,6 +623,7 @@ app.on("activate", () => {
 app.on("before-quit", async () => {
   globalShortcut.unregisterAll();
   stopLockCheckInterval();
+  leaveSeatDetector.stop();
   observer.stop();
   await guard.stop();
 });
@@ -605,6 +708,14 @@ ipcMain.handle(
         posNm: res.posNm,
         corpNm: res.corpNm
       });
+      logLoadedConfig("로그인 저장됨", {
+        userServareaId,
+        userStaffId,
+        loginUserId: res.loginUserId ?? payload.loginUserId,
+        loginUserNm: res.loginUserNm,
+        posNm: res.posNm,
+        corpNm: res.corpNm
+      });
       await logger.write("LOGIN_SUCCESS", "INFO", { loginUserId: payload.loginUserId });
       return {
         success: true,
@@ -626,7 +737,13 @@ ipcMain.handle("pcoff:logout", async () => {
 ipcMain.handle("pcoff:getWorkTime", async () => {
   const api = await getApiClient();
   if (!api) {
-    return { source: "mock", data: buildMockWorkTime() };
+    const mockData = buildMockWorkTime() as Record<string, unknown>;
+    if (localLeaveSeatDetectedAt) {
+      mockData.screenType = "empty";
+      mockData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+    }
+    logLoadedConfig("근태정보 (getWorkTime IPC, mock)", { source: "mock", pcOnYn: mockData.pcOnYn, screenType: mockData.screenType });
+    return { source: "mock", data: mockData };
   }
 
   try {
@@ -635,7 +752,23 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     // 캐시 업데이트
     lastWorkTimeData = data as Record<string, unknown>;
     lastWorkTimeFetchedAt = new Date().toISOString();
-    
+    leaveSeatDetector.updatePolicy({
+      leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
+      leaveSeatTimeMinutes: Number(data.leaveSeatTime ?? 0) || 0
+    });
+    const wt = data as Record<string, unknown>;
+    logLoadedConfig("근태정보 (getWorkTime IPC)", {
+      source: "api",
+      pcOnYn: data.pcOnYn,
+      screenType: wt.screenType,
+      pcOnYmdTime: data.pcOnYmdTime,
+      pcOffYmdTime: data.pcOffYmdTime,
+      leaveSeatUseYn: data.leaveSeatUseYn,
+      leaveSeatTime: data.leaveSeatTime,
+      leaveSeatReasonYn: data.leaveSeatReasonYn,
+      leaveSeatReasonManYn: data.leaveSeatReasonManYn
+    });
+
     // FR-04: 비밀번호 변경 감지
     if (data.pwdChgYn === "Y") {
       await authPolicy.onPasswordChangeDetected("getPcOffWorkTime", data.pwdChgMsg);
@@ -647,11 +780,21 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
         });
       }
     }
-    
-    return { source: "api", data };
+
+    const merged = { ...data } as Record<string, unknown>;
+    if (localLeaveSeatDetectedAt) {
+      merged.screenType = "empty";
+      merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+    }
+    return { source: "api", data: merged };
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "getPcOffWorkTime", error: String(error) });
-    return { source: "fallback", data: buildMockWorkTime(), error: String(error) };
+    const fallbackData = buildMockWorkTime() as Record<string, unknown>;
+    if (localLeaveSeatDetectedAt) {
+      fallbackData.screenType = "empty";
+      fallbackData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+    }
+    return { source: "fallback", data: fallbackData, error: String(error) };
   }
 });
 
@@ -686,7 +829,10 @@ ipcMain.handle("pcoff:requestEmergencyUse", async (_event, payload: { reason: st
 
 ipcMain.handle(
   "pcoff:requestPcOnOffLog",
-  async (_event, payload: { tmckButnCd: "IN" | "OUT"; eventName?: string; reason?: string }): Promise<ActionResult> => {
+  async (
+    _event,
+    payload: { tmckButnCd: "IN" | "OUT"; eventName?: string; reason?: string; isLeaveSeat?: boolean }
+  ): Promise<ActionResult> => {
     const api = await getApiClient();
     if (!api) return { source: "mock", success: true };
     try {
@@ -698,6 +844,25 @@ ipcMain.handle(
       });
       // PC-ON 시 잠금화면 → 작동정보 화면으로 전환
       if (payload.tmckButnCd === "IN") {
+        if (payload.isLeaveSeat) {
+          const hasReason = Boolean(payload.reason?.trim());
+          await logger.write(LOG_CODES.LEAVE_SEAT_UNLOCK, "INFO", {
+            hasReason,
+            reason: payload.reason ?? ""
+          });
+          if (hasReason) {
+            await logger.write(LOG_CODES.LEAVE_SEAT_REASON_SUBMITTED, "INFO", {
+              reason: payload.reason
+            });
+          }
+        }
+        if (localLeaveSeatDetectedAt) {
+          await logger.write(LOG_CODES.LEAVE_SEAT_RELEASED, "INFO", {
+            reason: localLeaveSeatReason ?? "unknown"
+          });
+          localLeaveSeatDetectedAt = null;
+          localLeaveSeatReason = null;
+        }
         createTrayInfoWindow();
       }
       return { source: "api", success: true, data };

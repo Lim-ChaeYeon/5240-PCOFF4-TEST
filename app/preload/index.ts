@@ -98,8 +98,8 @@ const api = {
       data?: unknown;
       error?: string;
     }>,
-  requestPcOnOffLog: (tmckButnCd: "IN" | "OUT", eventName: string, reason = "") =>
-    ipcRenderer.invoke("pcoff:requestPcOnOffLog", { tmckButnCd, eventName, reason }) as Promise<{
+  requestPcOnOffLog: (tmckButnCd: "IN" | "OUT", eventName: string, reason = "", isLeaveSeat = false) =>
+    ipcRenderer.invoke("pcoff:requestPcOnOffLog", { tmckButnCd, eventName, reason, isLeaveSeat }) as Promise<{
       source: "api" | "mock" | "fallback";
       success: boolean;
       data?: unknown;

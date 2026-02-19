@@ -1,8 +1,8 @@
 {
   "summary": {
-    "generatedAt": "2026-02-19T05:30:04.970Z",
-    "total": 8,
-    "passed": 8,
+    "generatedAt": "2026-02-19T06:18:36.875Z",
+    "total": 10,
+    "passed": 10,
     "failed": 0,
     "requiredFlows": [
       "Flow-01",
@@ -38,7 +38,7 @@
       ],
       "success": true,
       "details": "login success flow simulated",
-      "finishedAt": "2026-02-19T05:30:04.951Z"
+      "finishedAt": "2026-02-19T06:18:36.835Z"
     },
     {
       "scenario": "lock_reason_input",
@@ -51,7 +51,7 @@
       ],
       "success": true,
       "details": "lock + reason input flow simulated",
-      "finishedAt": "2026-02-19T05:30:04.951Z"
+      "finishedAt": "2026-02-19T06:18:36.836Z"
     },
     {
       "scenario": "update_success",
@@ -66,7 +66,7 @@
       ],
       "success": true,
       "details": "silent update flow simulated",
-      "finishedAt": "2026-02-19T05:30:04.951Z"
+      "finishedAt": "2026-02-19T06:18:36.836Z"
     },
     {
       "scenario": "update_failure_retry",
@@ -79,7 +79,7 @@
       ],
       "success": true,
       "details": "update failure retry flow simulated",
-      "finishedAt": "2026-02-19T05:30:04.951Z"
+      "finishedAt": "2026-02-19T06:18:36.836Z"
     },
     {
       "scenario": "password_change_confirm",
@@ -93,7 +93,7 @@
       ],
       "success": true,
       "details": "password confirm-only policy simulated",
-      "finishedAt": "2026-02-19T05:30:04.951Z"
+      "finishedAt": "2026-02-19T06:18:36.836Z"
     },
     {
       "scenario": "tamper_attempt",
@@ -107,7 +107,7 @@
       ],
       "success": true,
       "details": "tamper detection simulated, guard active: false, integrity valid: true",
-      "finishedAt": "2026-02-19T05:30:04.970Z"
+      "finishedAt": "2026-02-19T06:18:36.875Z"
     },
     {
       "scenario": "offline_detected",
@@ -121,7 +121,7 @@
       ],
       "success": true,
       "details": "offline/crash flow simulated, OFFLINE_DETECTED and CRASH_DETECTED logged",
-      "finishedAt": "2026-02-19T05:30:04.970Z"
+      "finishedAt": "2026-02-19T06:18:36.875Z"
     },
     {
       "scenario": "installer_registry_sync",
@@ -134,7 +134,37 @@
       ],
       "success": true,
       "details": "installer registry created: deviceId=82f41194-7c45-4151-9cef-a71dcac858fe, syncStatus=failed",
-      "finishedAt": "2026-02-19T05:30:04.959Z"
+      "finishedAt": "2026-02-19T06:18:36.875Z"
+    },
+    {
+      "scenario": "leave_seat_reason_required",
+      "flowId": "Flow-02",
+      "requirementIds": [
+        "FR-11"
+      ],
+      "expectedLogCodes": [
+        "LEAVE_SEAT_DETECTED",
+        "LEAVE_SEAT_REASON_SUBMITTED",
+        "LEAVE_SEAT_UNLOCK"
+      ],
+      "success": true,
+      "details": "leave seat reason required: detectedAt=10:30, reason=\"회의 참석\"",
+      "finishedAt": "2026-02-19T06:18:36.875Z"
+    },
+    {
+      "scenario": "leave_seat_break_exempt",
+      "flowId": "Flow-02b",
+      "requirementIds": [
+        "FR-11"
+      ],
+      "expectedLogCodes": [
+        "LEAVE_SEAT_DETECTED",
+        "LEAVE_SEAT_BREAK_EXEMPT",
+        "LEAVE_SEAT_UNLOCK"
+      ],
+      "success": true,
+      "details": "leave seat break exempt: isBreakTime=true, requireReason=false",
+      "finishedAt": "2026-02-19T06:18:36.875Z"
     }
   ]
 }

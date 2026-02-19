@@ -11,6 +11,8 @@ export interface WorkTimeResponse {
   leaveSeatReasonManYn?: "YES" | "NO";
   pcoffEmergencyYesNo?: "YES" | "NO";
   leaveSeatUseYn?: "Y" | "N";
+  /** 이석 판정 기준 시간(분). 유휴/절전 경과 >= 이 값이면 이석 처리 */
+  leaveSeatTime?: number;
   emergencyUseYesNo?: "YES" | "NO";
   /** 비밀번호 변경 필요 여부 (서버에서 플래그 제공 시) */
   pwdChgYn?: "Y" | "N";

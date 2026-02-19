@@ -3,7 +3,7 @@
 Electron 앱에서 사용하는 로그 코드 매핑.  
 레거시 `5240.PcOff-master/docs/logcode.md`와 동기화하며, `app/core/constants.ts`의 `LOG_CODES`와 일치시킨다.
 
-**Last Updated**: 2026-02-16
+**Last Updated**: 2026-02-19
 
 ---
 
@@ -85,10 +85,14 @@ Electron 앱에서 사용하는 로그 코드 매핑.
 
 | Log Code | Description | 비고 |
 |----------|-------------|------|
-| LEAVE_SEAT_IDLE_DETECTED | Idle 기반 이석 감지 | powerMonitor.getSystemIdleTime() 초과 |
-| LEAVE_SEAT_SLEEP_DETECTED | 절전 기반 이석 감지 | resume 시 절전 경과시간 >= 이석시간 |
+| LEAVE_SEAT_DETECTED | 이석 감지(화면 로드 시) | screenType=empty 시 잠금화면 진입 |
+| LEAVE_SEAT_UNLOCK | 이석 해제(PC-ON) | PC-ON 성공 시 |
+| LEAVE_SEAT_REASON_SUBMITTED | 이석 사유 입력 완료 | 사유 필수 시 모달에서 제출 |
+| LEAVE_SEAT_BREAK_EXEMPT | 휴게시간 이석 면제 | breakStartTime~breakEndTime 내 PC-ON |
+| LEAVE_SEAT_IDLE_DETECTED | Idle 기반 이석 감지 | powerMonitor.getSystemIdleTime() 초과(로컬) |
+| LEAVE_SEAT_SLEEP_DETECTED | 절전 기반 이석 감지 | resume 시 절전 경과시간 >= 이석시간(로컬) |
 | LEAVE_SEAT_RESUME_CHECKED | 절전 복귀 시 이석 체크 | |
-| LEAVE_SEAT_RELEASED | 이석 해제 | 사유 입력 후 PC-ON |
+| LEAVE_SEAT_RELEASED | 로컬 이석 해제 | 로컬 이석 감지 후 PC-ON 성공 시 |
 | SLEEP_ENTERED | 절전모드 진입 | powerMonitor.on("suspend") |
 | SLEEP_RESUMED | 절전모드 복귀 | powerMonitor.on("resume") |
 

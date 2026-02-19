@@ -88,6 +88,20 @@
       </div>
     </div>
 
+    <!-- 이석 사유 입력 모달 (screenType=empty, leaveSeatReasonYn=YES, leaveSeatReasonManYn=YES 일 때) -->
+    <div id="leave-seat-modal" class="modal-overlay hidden" aria-label="이석 사유 입력">
+      <div class="modal-box">
+        <h2 class="modal-title">이석 사유 입력</h2>
+        <p class="modal-desc" id="leave-seat-desc">자리를 비운 사유를 입력한 뒤 PC-ON 하세요.</p>
+        <p id="leave-seat-detected-at" class="modal-hint" style="display:none"></p>
+        <input id="leave-seat-reason-input" type="text" class="login-input modal-input" placeholder="예: 회의 참석" maxlength="200" />
+        <div class="modal-actions">
+          <button id="leave-seat-modal-cancel" class="button ghost">취소</button>
+          <button id="leave-seat-modal-confirm" class="button primary">PC-ON</button>
+        </div>
+      </div>
+    </div>
+
     <!-- FR-04: 비밀번호 변경 확인 모달 (검증 없이 확인만) -->
     <div id="password-change-modal" class="modal-overlay hidden" aria-label="비밀번호 변경 확인">
       <div class="modal-box">

@@ -30,7 +30,13 @@ const DEFAULT_WORK = {
   pcoffEmergencyYesNo: "YES",
   pcOnYn: "Y",
   pcOnMsg: "",
-  screenType: "off"
+  screenType: "off",
+  leaveSeatReasonYn: "NO",
+  leaveSeatReasonManYn: "NO",
+  leaveSeatOffInputMath: null,
+  breakStartTime: null,
+  breakEndTime: null,
+  leaveSeatTime: 5
 };
 
 function parseYmdHm(value) {
@@ -71,8 +77,119 @@ function coerceWorkTimeFromApi(data) {
     pcExCount: Number(data.pcExCount ?? DEFAULT_WORK.pcExCount),
     pcExMaxCount: Number(data.pcExMaxCount ?? DEFAULT_WORK.pcExMaxCount),
     pcExTime: Number(data.pcExTime ?? DEFAULT_WORK.pcExTime),
-    pcoffEmergencyYesNo: data.pcoffEmergencyYesNo ?? data.emergencyUseYesNo ?? DEFAULT_WORK.pcoffEmergencyYesNo
+    pcoffEmergencyYesNo: data.pcoffEmergencyYesNo ?? data.emergencyUseYesNo ?? DEFAULT_WORK.pcoffEmergencyYesNo,
+    leaveSeatReasonYn: data.leaveSeatReasonYn ?? DEFAULT_WORK.leaveSeatReasonYn,
+    leaveSeatReasonManYn: data.leaveSeatReasonManYn ?? DEFAULT_WORK.leaveSeatReasonManYn,
+    leaveSeatOffInputMath: data.leaveSeatOffInputMath ?? null,
+    breakStartTime: data.breakStartTime ?? null,
+    breakEndTime: data.breakEndTime ?? null,
+    leaveSeatTime: Number(data.leaveSeatTime ?? DEFAULT_WORK.leaveSeatTime ?? 0) || 0
   };
+}
+
+/**
+ * 이석 사유 입력 필요 여부 판별
+ * - screenType=empty + leaveSeatReasonYn=YES + leaveSeatReasonManYn=YES → 필수
+ * - 단, 현재 시각이 휴게시간(breakStartTime~breakEndTime) 안이면 면제
+ */
+function calcLeaveSeatPolicy(work) {
+  const isLeaveSeat = work.screenType === "empty";
+  if (!isLeaveSeat) return { isLeaveSeat: false, requireReason: false, isBreakTime: false, detectedAt: null };
+
+  const isBreakTime = checkIsBreakTime(work.breakStartTime, work.breakEndTime);
+  const requireReason =
+    work.leaveSeatReasonYn === "YES" &&
+    work.leaveSeatReasonManYn === "YES" &&
+    !isBreakTime;
+
+  const detectedAt = work.leaveSeatOffInputMath
+    ? formatDetectedAt(work.leaveSeatOffInputMath)
+    : null;
+
+  return { isLeaveSeat, requireReason, isBreakTime, detectedAt };
+}
+
+function parseTimeToDate(value) {
+  if (!value) return null;
+  const now = new Date();
+  if (String(value).length === 4) {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+      Number(String(value).slice(0, 2)), Number(String(value).slice(2, 4)), 0);
+  }
+  if (String(value).length === 12) {
+    return new Date(
+      Number(String(value).slice(0, 4)), Number(String(value).slice(4, 6)) - 1,
+      Number(String(value).slice(6, 8)), Number(String(value).slice(8, 10)),
+      Number(String(value).slice(10, 12)), 0
+    );
+  }
+  return null;
+}
+
+function checkIsBreakTime(breakStartTime, breakEndTime) {
+  if (!breakStartTime || !breakEndTime) return false;
+  const now = new Date();
+  const start = parseTimeToDate(breakStartTime);
+  const end = parseTimeToDate(breakEndTime);
+  if (!start || !end) return false;
+  return now >= start && now < end;
+}
+
+function formatDetectedAt(value) {
+  if (!value || String(value).length !== 12) return String(value ?? "");
+  return `${String(value).slice(8, 10)}:${String(value).slice(10, 12)}`;
+}
+
+/**
+ * 이석 사유 입력 모달을 표시하고 사용자가 입력한 사유(string) 또는 취소(null)를 반환
+ */
+function showLeaveSeatReasonModal(work) {
+  const overlay = document.getElementById("leave-seat-modal");
+  const input = document.getElementById("leave-seat-reason-input");
+  const detectedAtEl = document.getElementById("leave-seat-detected-at");
+  const btnCancel = document.getElementById("leave-seat-modal-cancel");
+  const btnConfirm = document.getElementById("leave-seat-modal-confirm");
+  if (!overlay || !input) return Promise.resolve(null);
+
+  if (work.detectedAt) {
+    if (detectedAtEl) {
+      detectedAtEl.textContent = `이석 감지 시각: ${work.detectedAt}`;
+      detectedAtEl.style.display = "";
+    }
+  }
+
+  input.value = "";
+  overlay.classList.remove("hidden");
+  input.focus();
+
+  return new Promise((resolve) => {
+    const close = (value) => {
+      overlay.classList.add("hidden");
+      btnCancel.removeEventListener("click", onCancel);
+      btnConfirm.removeEventListener("click", onConfirm);
+      overlay.removeEventListener("click", onOverlayClick);
+      input.removeEventListener("keydown", onKeydown);
+      resolve(value);
+    };
+    const onCancel = () => close(null);
+    const onConfirm = () => {
+      const reason = (input.value ?? "").trim();
+      if (!reason) {
+        showToast("이석 사유를 입력해 주세요.");
+        return;
+      }
+      close(reason);
+    };
+    const onOverlayClick = (e) => { if (e.target === overlay) close(null); };
+    const onKeydown = (e) => {
+      if (e.key === "Escape") close(null);
+      if (e.key === "Enter") onConfirm();
+    };
+    btnCancel.addEventListener("click", onCancel);
+    btnConfirm.addEventListener("click", onConfirm);
+    overlay.addEventListener("click", onOverlayClick);
+    input.addEventListener("keydown", onKeydown);
+  });
 }
 
 function showToast(text) {
@@ -335,6 +452,14 @@ async function bootstrap() {
   applyLockInfo(work);
   applyButtonDisp(work);
 
+  // 이석 정책 계산 (사유 필수 여부 / 휴게시간 여부)
+  const leaveSeatPolicy = calcLeaveSeatPolicy(work);
+
+  // 이석 상태일 때 UI 힌트 추가 (휴게시간 면제 안내)
+  if (leaveSeatPolicy.isLeaveSeat && leaveSeatPolicy.isBreakTime) {
+    showToast("휴게시간 중: 사유 입력 없이 PC-ON 가능");
+  }
+
   btnExtendEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestPcExtend) return showToast("preview 모드: 임시연장");
     await runAction("임시연장", () => window.pcoffApi.requestPcExtend(work.pcOffYmdTime));
@@ -347,6 +472,27 @@ async function bootstrap() {
   });
   btnPlayEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestPcOnOffLog) return showToast("preview 모드: PC-ON");
+
+    // 이석 상태이고 사유 입력이 필요한 경우 → 모달 표시
+    if (leaveSeatPolicy.requireReason) {
+      const reason = await showLeaveSeatReasonModal(leaveSeatPolicy);
+      if (reason == null || reason === "") return; // 취소
+      // 사유 포함하여 PC-ON 요청 (isLeaveSeat=true 플래그로 서버 로그 구분)
+      await runAction("PC-ON (이석해제)", () =>
+        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off", reason, true)
+      );
+      return;
+    }
+
+    // 이석 상태이지만 사유 면제 (휴게시간 중)
+    if (leaveSeatPolicy.isLeaveSeat && leaveSeatPolicy.isBreakTime) {
+      await runAction("PC-ON (휴게시간·사유면제)", () =>
+        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off", "", true)
+      );
+      return;
+    }
+
+    // 일반 PC-ON
     await runAction("PC-ON", () => window.pcoffApi.requestPcOnOffLog("IN", "Lock Off"));
   });
   btnOffEl?.addEventListener("click", async () => {
@@ -363,6 +509,15 @@ async function bootstrap() {
   // 잠금화면 로그
   if (window.pcoffApi?.logEvent) {
     window.pcoffApi.logEvent("LOCK_SCREEN_OPENED", { screenType: work.screenType });
+
+    // 이석 상태이면 LEAVE_SEAT_DETECTED 로그
+    if (leaveSeatPolicy.isLeaveSeat) {
+      window.pcoffApi.logEvent("LEAVE_SEAT_DETECTED", {
+        detectedAt: leaveSeatPolicy.detectedAt,
+        requireReason: leaveSeatPolicy.requireReason,
+        isBreakTime: leaveSeatPolicy.isBreakTime
+      });
+    }
   }
 }
 

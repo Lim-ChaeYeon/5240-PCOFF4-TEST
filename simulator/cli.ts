@@ -13,7 +13,9 @@ const ALL_SCENARIOS: ScenarioName[] = [
   "password_change_confirm",
   "tamper_attempt",
   "offline_detected",
-  "installer_registry_sync"
+  "installer_registry_sync",
+  "leave_seat_reason_required",
+  "leave_seat_break_exempt"
 ];
 
 async function main(): Promise<void> {

@@ -6,7 +6,9 @@ export type ScenarioName =
   | "password_change_confirm"
   | "tamper_attempt"
   | "offline_detected"
-  | "installer_registry_sync";
+  | "installer_registry_sync"
+  | "leave_seat_reason_required"
+  | "leave_seat_break_exempt";
 
 export interface ScenarioResult {
   scenario: ScenarioName;
@@ -48,6 +50,10 @@ export async function runScenario(name: ScenarioName): Promise<ScenarioResult> {
       return await runOfflineDetectedScenario();
     case "installer_registry_sync":
       return await runInstallerRegistrySyncScenario();
+    case "leave_seat_reason_required":
+      return await runLeaveSeatReasonRequiredScenario();
+    case "leave_seat_break_exempt":
+      return await runLeaveSeatBreakExemptScenario();
     default:
       return fail(name, "unknown flow", [], [], "unknown scenario");
   }
@@ -233,6 +239,140 @@ async function runInstallerRegistrySyncScenario(): Promise<ScenarioResult> {
       expectedLogCodes,
       success: false,
       details: `installer registry simulation failed: ${error}`,
+      finishedAt: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * Flow-02: 이석 감지 + 사유 입력 필수 시나리오
+ * - screenType=empty, leaveSeatReasonYn=YES, leaveSeatReasonManYn=YES
+ * - 휴게시간 외 → 사유 입력 필수
+ */
+async function runLeaveSeatReasonRequiredScenario(): Promise<ScenarioResult> {
+  const scenario: ScenarioName = "leave_seat_reason_required";
+  const flowId = "Flow-02";
+  const requirementIds = ["FR-11"];
+  const expectedLogCodes = ["LEAVE_SEAT_DETECTED", "LEAVE_SEAT_REASON_SUBMITTED", "LEAVE_SEAT_UNLOCK"];
+
+  try {
+    const { calcLeaveSeatPolicy } = await import("../app/core/leave-seat.js");
+    const { TelemetryLogger } = await import("../app/core/telemetry-log.js");
+
+    const baseDir = process.cwd();
+    const logger = new TelemetryLogger(baseDir, "sim-leave-seat", process.platform);
+
+    // 이석 상태 + 사유 필수 정책 (휴게시간 없음)
+    const workFields = {
+      screenType: "empty",
+      leaveSeatReasonYn: "YES" as const,
+      leaveSeatReasonManYn: "YES" as const,
+      leaveSeatOffInputMath: "202602191030",
+      breakStartTime: undefined,
+      breakEndTime: undefined
+    };
+
+    const policy = calcLeaveSeatPolicy(workFields);
+
+    if (!policy.isLeaveSeat) throw new Error("isLeaveSeat should be true");
+    if (!policy.requireReason) throw new Error("requireReason should be true for non-break-time");
+    if (policy.isBreakTime) throw new Error("isBreakTime should be false");
+
+    await logger.write("LEAVE_SEAT_DETECTED", "INFO", {
+      detectedAt: policy.detectedAt,
+      requireReason: policy.requireReason,
+      isBreakTime: policy.isBreakTime
+    });
+
+    // 사유 입력 시뮬레이션
+    const simulatedReason = "회의 참석";
+    await logger.write("LEAVE_SEAT_REASON_SUBMITTED", "INFO", { reason: simulatedReason });
+    await logger.write("LEAVE_SEAT_UNLOCK", "INFO", { hasReason: true, reason: simulatedReason });
+
+    return {
+      scenario,
+      flowId,
+      requirementIds,
+      expectedLogCodes,
+      success: true,
+      details: `leave seat reason required: detectedAt=${policy.detectedAt}, reason="${simulatedReason}"`,
+      finishedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    return {
+      scenario,
+      flowId,
+      requirementIds,
+      expectedLogCodes,
+      success: false,
+      details: `leave seat reason scenario failed: ${error}`,
+      finishedAt: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * Flow-02b: 이석 감지 + 휴게시간 → 사유 면제 시나리오
+ * - screenType=empty, leaveSeatReasonYn=YES, leaveSeatReasonManYn=YES
+ * - 현재 시각이 breakStartTime~breakEndTime 안 → 사유 면제
+ */
+async function runLeaveSeatBreakExemptScenario(): Promise<ScenarioResult> {
+  const scenario: ScenarioName = "leave_seat_break_exempt";
+  const flowId = "Flow-02b";
+  const requirementIds = ["FR-11"];
+  const expectedLogCodes = ["LEAVE_SEAT_DETECTED", "LEAVE_SEAT_BREAK_EXEMPT", "LEAVE_SEAT_UNLOCK"];
+
+  try {
+    const { calcLeaveSeatPolicy } = await import("../app/core/leave-seat.js");
+    const { TelemetryLogger } = await import("../app/core/telemetry-log.js");
+
+    const baseDir = process.cwd();
+    const logger = new TelemetryLogger(baseDir, "sim-leave-break", process.platform);
+
+    // 현재 시각을 포함하는 넓은 휴게 구간으로 설정 (00:00~23:59)
+    const workFields = {
+      screenType: "empty",
+      leaveSeatReasonYn: "YES" as const,
+      leaveSeatReasonManYn: "YES" as const,
+      leaveSeatOffInputMath: "202602191030",
+      breakStartTime: "0000",
+      breakEndTime: "2359"
+    };
+
+    const policy = calcLeaveSeatPolicy(workFields);
+
+    if (!policy.isLeaveSeat) throw new Error("isLeaveSeat should be true");
+    if (policy.requireReason) throw new Error("requireReason should be false during break time");
+    if (!policy.isBreakTime) throw new Error("isBreakTime should be true with 00:00~23:59 range");
+
+    await logger.write("LEAVE_SEAT_DETECTED", "INFO", {
+      detectedAt: policy.detectedAt,
+      requireReason: policy.requireReason,
+      isBreakTime: policy.isBreakTime
+    });
+    await logger.write("LEAVE_SEAT_BREAK_EXEMPT", "INFO", {
+      breakStartTime: workFields.breakStartTime,
+      breakEndTime: workFields.breakEndTime
+    });
+    await logger.write("LEAVE_SEAT_UNLOCK", "INFO", { hasReason: false, reason: "" });
+
+    return {
+      scenario,
+      flowId,
+      requirementIds,
+      expectedLogCodes,
+      success: true,
+      details: `leave seat break exempt: isBreakTime=${policy.isBreakTime}, requireReason=${policy.requireReason}`,
+      finishedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    return {
+      scenario,
+      flowId,
+      requirementIds,
+      expectedLogCodes,
+      success: false,
+      details: `leave seat break exempt scenario failed: ${error}`,
       finishedAt: new Date().toISOString()
     };
   }

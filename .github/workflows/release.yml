@@ -110,24 +110,26 @@ jobs:
         run: |
           rm -f win-x64/builder-debug.yml mac/builder-debug.yml 2>/dev/null || true
 
-      # 태그 푸시 직후 API 반영·일시 오류 완화
-      - name: Wait before release
-        run: sleep 20
-
-      - name: Create GitHub Release (essential files only)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: false
-          generate_release_notes: false
-          files: |
-            win-x64/*.exe
-            win-x64/*.yml
-            win-x64/*.blockmap
-            mac/*.dmg
-            mac/*.zip
-            mac/*.yml
-            mac/*.blockmap
+      - name: Create GitHub Release (gh CLI, 재시도 제어)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          # 릴리스 없으면 생성 (이미 있으면 무시)
+          gh release create "$TAG" --title "Release $TAG" --notes "" --generate-notes=false 2>/dev/null || true
+          # 업로드: 최대 5회 재시도 (Finalizing 오류 회피)
+          set +e
+          for i in 1 2 3 4 5; do
+            FILES=()
+            for g in win-x64/*.exe win-x64/*.yml win-x64/*.blockmap mac/*.dmg mac/*.zip mac/*.yml mac/*.blockmap; do
+              [ -e "$g" ] && FILES+=("$g")
+            done
+            [ ${#FILES[@]} -eq 0 ] && { echo "No files to upload"; exit 1; }
+            if gh release upload "$TAG" "${FILES[@]}" --clobber; then
+              echo "Upload succeeded."
+              exit 0
+            fi
+            echo "Upload attempt $i failed, retry in 30s..."
+            sleep 30
+          done
+          exit 1

@@ -1,14 +1,21 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, globalShortcut } from "electron";
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, globalShortcut, protocol } from "electron";
 import type { LeaveSeatDetectedReason } from "../core/leave-seat-detector.js";
 import { LeaveSeatDetector } from "../core/leave-seat-detector.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_NAME, LOG_CODES, PATHS } from "../core/constants.js";
 
 // ESM에서 __dirname 대체
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// 맥 패키징 시 file:// 로 asar 내부 로드가 차단되므로 app:// 프로토콜 사용 (app.ready 전 등록)
+protocol.registerSchemesAsPrivileged([
+  { scheme: "app", privileges: { secure: true, supportFetchAPI: true } }
+]);
+
 import { FeatureStateMachine } from "../core/state-machine.js";
 import { TelemetryLogger } from "../core/telemetry-log.js";
 import { UpdateManager } from "../core/update-manager.js";
@@ -175,6 +182,19 @@ function getRendererPath(htmlFile: string): string {
   return fallback;
 }
 
+/** 맥 패키징 시 file:// 차단 우회용 app:// URL */
+function getRendererUrl(htmlFile: string): string {
+  return `app://./app/renderer/${htmlFile}`;
+}
+
+/** 창에 HTML 로드 — 맥 패키징 시 app://, 그 외 loadFile. 반환 Promise로 catch 가능 */
+function loadRendererInWindow(win: BrowserWindow, htmlFile: string): Promise<void> {
+  if (process.platform === "darwin" && app.isPackaged) {
+    return win.loadURL(getRendererUrl(htmlFile));
+  }
+  return win.loadFile(getRendererPath(htmlFile));
+}
+
 /**
  * mainWindow close 이벤트 핸들러 부착
  * - lock 화면: 닫기 완전 차단 (잠금 우회 방지)
@@ -211,8 +231,7 @@ async function createTrayInfoWindow(): Promise<void> {
   const lockShown = await checkLockAndShowLockWindow(mainWindow ?? undefined);
   if (lockShown) return;
 
-  const htmlPath = getRendererPath("main.html");
-  console.info("[PCOFF] Opening tray info window:", htmlPath);
+  console.info("[PCOFF] Opening tray info window (main.html)");
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "tray-info";
@@ -226,7 +245,7 @@ async function createTrayInfoWindow(): Promise<void> {
       mainWindow.setAlwaysOnTop(false);
       mainWindow.focus();
     }
-    mainWindow.loadFile(htmlPath);
+    loadRendererInWindow(mainWindow, "main.html");
     return;
   }
 
@@ -257,7 +276,7 @@ async function createTrayInfoWindow(): Promise<void> {
       win.focus();
     }
   });
-  win.loadFile(htmlPath).catch((err) => {
+  loadRendererInWindow(win, "main.html").catch((err) => {
     console.error("[PCOFF] Failed to load main.html:", err);
     win.show();
     win.focus();
@@ -282,7 +301,7 @@ function createLockWindow(): void {
     currentScreen = "lock";
     mainWindow.setSize(1040, 720);
     mainWindow.setTitle("PCOFF 잠금화면");
-    mainWindow.loadFile(getRendererPath("lock.html"));
+    loadRendererInWindow(mainWindow, "lock.html");
     mainWindow.show();
     mainWindow.focus();
     return;
@@ -306,7 +325,7 @@ function createLockWindow(): void {
   mainWindow = win;
   currentScreen = "lock";
   attachMainWindowCloseHandler(win);
-  win.loadFile(getRendererPath("lock.html"));
+  loadRendererInWindow(win, "lock.html");
 }
 
 /** 같은 창에 잠금 화면 로드 (로그인 → 잠금 전환 시 새 창 안 띄움) */
@@ -316,7 +335,7 @@ function showLockInWindow(win: BrowserWindow): void {
   currentScreen = "lock";
   win.setSize(1040, 720);
   win.setTitle("PCOFF 잠금화면");
-  win.loadFile(getRendererPath("lock.html"));
+  loadRendererInWindow(win, "lock.html");
   win.show();
   win.focus();
 }
@@ -362,7 +381,7 @@ function createLoginWindow(): void {
     currentScreen = "login";
     mainWindow.setSize(520, 620);
     mainWindow.setTitle("PCOFF 로그인");
-    mainWindow.loadFile(getRendererPath("index.html"));
+    loadRendererInWindow(mainWindow, "index.html");
     mainWindow.show();
     mainWindow.focus();
     return;
@@ -382,7 +401,7 @@ function createLoginWindow(): void {
   mainWindow = win;
   currentScreen = "login";
   attachMainWindowCloseHandler(win);
-  win.loadFile(getRendererPath("index.html"));
+  loadRendererInWindow(win, "index.html");
 }
 
 /** 트레이용 fallback: 16x16 밝은 색(어두운 작업표시줄에서도 보이도록) */
@@ -587,6 +606,31 @@ function stopLockCheckInterval(): void {
 }
 
 app.whenReady().then(async () => {
+  // 맥 패키징 시 asar 내부 file:// 차단 우회: app:// 로 리소스 제공
+  if (process.platform === "darwin" && app.isPackaged) {
+    const MIME: Record<string, string> = {
+      ".html": "text/html",
+      ".js": "application/javascript",
+      ".css": "text/css",
+      ".json": "application/json",
+      ".png": "image/png",
+      ".ico": "image/x-icon",
+      ".svg": "image/svg+xml"
+    };
+    protocol.handle("app", async (request) => {
+      const pathname = decodeURIComponent(new URL(request.url).pathname).replace(/^\//, "");
+      const filePath = join(app.getAppPath(), pathname);
+      try {
+        const buf = await readFile(filePath);
+        const mime = MIME[extname(filePath)] ?? "application/octet-stream";
+        return new Response(buf, { headers: { "Content-Type": mime } });
+      } catch (e) {
+        console.error("[PCOFF] app protocol failed:", filePath, e);
+        return new Response("Not Found", { status: 404 });
+      }
+    });
+  }
+
   app.setName(APP_NAME);
   // 설치 앱: userData 사용(개발 시 state와 분리). 개발: process.cwd()
   baseDir = app.isPackaged ? app.getPath("userData") : process.cwd();

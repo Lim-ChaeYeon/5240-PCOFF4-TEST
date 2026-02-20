@@ -28,7 +28,8 @@ import {
   syncInstallerRegistry
 } from "../core/installer-registry.js";
 
-const baseDir = process.cwd();
+/** 개발 시: 프로젝트 디렉터리, 설치 앱: userData(설치 앱 전용 상태·로그 분리) */
+let baseDir = process.cwd();
 
 // 윈도우 관리: 모든 화면(작동정보·로그인·잠금)을 하나의 창에서 전환
 let mainWindow: BrowserWindow | null = null;
@@ -50,11 +51,12 @@ let localLeaveSeatReason: LeaveSeatDetectedReason | null = null;
 const leaveSeatDetector = new LeaveSeatDetector();
 
 const machine = new FeatureStateMachine();
-const logger = new TelemetryLogger(baseDir, machine.getSessionId(), process.platform);
-const updater = new UpdateManager(baseDir, logger);
-const observer = new OpsObserver(logger, () => getApiBaseUrl(baseDir));
-const authPolicy = new AuthPolicy(logger);
-const guard = new AgentGuard(baseDir, logger);
+/** whenReady()에서 baseDir 설정 후 초기화됨 (설치 앱은 userData 사용) */
+let logger: TelemetryLogger;
+let updater: UpdateManager;
+let observer: OpsObserver;
+let authPolicy: AuthPolicy;
+let guard: AgentGuard;
 
 function getTodayYmd(): string {
   const now = new Date();
@@ -118,11 +120,17 @@ async function getApiClient(): Promise<PcOffApiClient | null> {
 }
 
 function getPreloadPath(): string | undefined {
-  const preloadCandidates = [
-    join(__dirname, "../preload/index.js"),
-    join(process.cwd(), "dist/app/preload/index.js"),
-    join(app.getAppPath(), "dist/app/preload/index.js")
-  ];
+  const appPath = app.getAppPath();
+  const preloadCandidates = app.isPackaged
+    ? [
+        join(appPath, "dist/app/preload/index.js"),
+        join(__dirname, "../preload/index.js")
+      ]
+    : [
+        join(__dirname, "../preload/index.js"),
+        join(process.cwd(), "dist/app/preload/index.js"),
+        join(appPath, "dist/app/preload/index.js")
+      ];
   const preloadPath = preloadCandidates.find((p) => existsSync(p));
   if (!preloadPath) {
     console.error("[PCOFF] Preload not found. Tried:", preloadCandidates);
@@ -133,16 +141,22 @@ function getPreloadPath(): string | undefined {
 }
 
 function getRendererPath(htmlFile: string): string {
-  const candidates = [
-    join(__dirname, `../../../app/renderer/${htmlFile}`),
-    join(process.cwd(), "app/renderer", htmlFile),
-    join(process.cwd(), "build", htmlFile),
-    join(app.getAppPath(), "app/renderer", htmlFile)
-  ];
+  const appPath = app.getAppPath();
+  const candidates = app.isPackaged
+    ? [
+        join(appPath, "app/renderer", htmlFile),
+        join(__dirname, `../../../app/renderer/${htmlFile}`)
+      ]
+    : [
+        join(__dirname, `../../../app/renderer/${htmlFile}`),
+        join(process.cwd(), "app/renderer", htmlFile),
+        join(process.cwd(), "build", htmlFile),
+        join(appPath, "app/renderer", htmlFile)
+      ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
   }
-  const fallback = join(process.cwd(), "app/renderer", htmlFile);
+  const fallback = join(appPath, "app/renderer", htmlFile);
   console.warn("[PCOFF] Renderer path not found, using fallback:", fallback);
   return fallback;
 }
@@ -175,8 +189,10 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
  * 트레이에서 열리는 에이전트 정보 화면 (main.html)
  * 버튼 없이 정보 조회만 가능.
  * 화면 오픈 시 잠금 필요(종업 시간 경과 등)면 잠금화면을 먼저 표시한다.
+ * Windows: setAlwaysOnTop으로 창을 앞으로 가져옴.
  */
 async function createTrayInfoWindow(): Promise<void> {
+  try {
   // 종업 시간 경과 등으로 잠금 필요 시 작동정보 대신 잠금화면 표시
   const lockShown = await checkLockAndShowLockWindow(mainWindow ?? undefined);
   if (lockShown) return;
@@ -188,9 +204,15 @@ async function createTrayInfoWindow(): Promise<void> {
     currentScreen = "tray-info";
     mainWindow.setSize(560, 760);
     mainWindow.setTitle("PCOFF 작동정보");
-    mainWindow.loadFile(htmlPath);
+    // Windows: 먼저 창을 보이게 한 뒤 로드해 트레이 클릭 시 바로 창이 보이도록
     mainWindow.show();
     mainWindow.focus();
+    if (process.platform === "win32") {
+      mainWindow.setAlwaysOnTop(true);
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.focus();
+    }
+    mainWindow.loadFile(htmlPath);
     return;
   }
 
@@ -215,13 +237,26 @@ async function createTrayInfoWindow(): Promise<void> {
   win.once("ready-to-show", () => {
     win.show();
     win.focus();
+    if (process.platform === "win32") {
+      win.setAlwaysOnTop(true);
+      win.setAlwaysOnTop(false);
+      win.focus();
+    }
   });
   win.loadFile(htmlPath).catch((err) => {
     console.error("[PCOFF] Failed to load main.html:", err);
     win.show();
     win.focus();
+    if (process.platform === "win32") {
+      win.setAlwaysOnTop(true);
+      win.setAlwaysOnTop(false);
+      win.focus();
+    }
   });
   void logger.write("TRAY_INFO_OPENED", "INFO", {});
+  } catch (err) {
+    console.error("[PCOFF] createTrayInfoWindow failed:", err);
+  }
 }
 
 /**
@@ -339,13 +374,17 @@ const TRAY_FALLBACK_ICON_DATA =
 function createTray(): void {
   if (tray) return;
 
-  // 트레이 아이콘 (assets/tray-icon.png 우선, 없으면 fallback으로 맥/윈도우 모두 표시)
-  const iconPath = join(__dirname, "../../../assets/tray-icon.png");
+  // 트레이 아이콘 (설치 앱: app.getAppPath() 기준, 없으면 fallback)
+  const appPath = app.getAppPath();
+  const iconCandidates = app.isPackaged
+    ? [join(appPath, "assets/tray-icon.png"), join(__dirname, "../../../assets/tray-icon.png")]
+    : [join(__dirname, "../../../assets/tray-icon.png"), join(process.cwd(), "assets/tray-icon.png")];
+  const iconPath = iconCandidates.find((p) => existsSync(p));
   let icon: Electron.NativeImage;
-  if (existsSync(iconPath)) {
+  if (iconPath) {
     icon = nativeImage.createFromPath(iconPath);
+    if (icon.isEmpty()) icon = nativeImage.createFromDataURL(TRAY_FALLBACK_ICON_DATA);
   } else {
-    // 파일 없을 때: 빈 아이콘은 맥 메뉴 막대에 안 보이므로 fallback 사용
     icon = nativeImage.createFromDataURL(TRAY_FALLBACK_ICON_DATA);
   }
 
@@ -356,6 +395,10 @@ function createTray(): void {
 
   tray = new Tray(icon);
   tray.setToolTip("5240 PCOFF Agent - 클릭 또는 메뉴에서 'PCOFF 작동정보' 선택");
+  // Windows: 단일 클릭이 더블클릭 대기로 먹히지 않도록 (트레이 클릭 시 창이 안 뜨는 이슈 완화)
+  if (process.platform === "win32") {
+    tray.setIgnoreDoubleClickEvents(true);
+  }
   updateTrayMenu();
 
   tray.on("click", () => {
@@ -495,6 +538,14 @@ function stopLockCheckInterval(): void {
 
 app.whenReady().then(async () => {
   app.setName(APP_NAME);
+  // 설치 앱: userData 사용(개발 시 state와 분리). 개발: process.cwd()
+  baseDir = app.isPackaged ? app.getPath("userData") : process.cwd();
+  logger = new TelemetryLogger(baseDir, machine.getSessionId(), process.platform);
+  updater = new UpdateManager(baseDir, logger);
+  observer = new OpsObserver(logger, () => getApiBaseUrl(baseDir));
+  authPolicy = new AuthPolicy(logger);
+  guard = new AgentGuard(baseDir, logger);
+
   await logger.write(LOG_CODES.APP_START, "INFO", { platform: process.platform });
 
   // FR-09: 설치자 레지스트리 초기화 및 서버 동기화 시도
@@ -534,19 +585,36 @@ app.whenReady().then(async () => {
   // FR-07: Agent Guard 시작 (무결성 감시)
   await guard.start();
   
-  // 시스템 트레이 생성
-  createTray();
+  // 시스템 트레이 생성 (실패 시에도 앱은 계속 실행, Windows에서 아이콘 경로 등 이슈 대비)
+  try {
+    createTray();
+  } catch (err) {
+    console.error("[PCOFF] Tray creation failed:", err);
+  }
 
-  // 전역 핫키 (맥에서 트레이가 안 보여도 동작)
-  globalShortcut.register("CommandOrControl+Shift+L", () => {
-    void doGlobalLogout();
-  });
-  globalShortcut.register("CommandOrControl+Shift+I", () => {
-    createTrayInfoWindow();
-  });
-  globalShortcut.register("CommandOrControl+Shift+K", () => {
-    createLockWindow();
-  });
+  // 전역 핫키 (설치 앱: macOS는 손쉬운 사용 허용 필요, Windows는 앱 포커스/관리자 권한에 따라 동작)
+  const hotkeys: [string, () => void][] = [
+    ["CommandOrControl+Shift+L", () => void doGlobalLogout()],
+    ["CommandOrControl+Shift+I", () => createTrayInfoWindow()],
+    ["CommandOrControl+Shift+K", () => createLockWindow()]
+  ];
+  const registerHotkeys = () => {
+    for (const [accel, fn] of hotkeys) {
+      try {
+        const ok = globalShortcut.register(accel, fn);
+        if (ok) console.info("[PCOFF] 핫키 등록:", accel);
+        else console.warn("[PCOFF] 핫키 등록 실패(이미 사용 중?):", accel);
+      } catch (e) {
+        console.warn("[PCOFF] 핫키 등록 실패:", accel, e, "(macOS: 손쉬운 사용 허용 확인)");
+      }
+    }
+  };
+  // Windows: 시작 직후 다른 앱이 포커스를 잡아 핫키가 동작하지 않을 수 있으므로 짧은 지연 후 등록
+  if (process.platform === "win32") {
+    setTimeout(registerHotkeys, 400);
+  } else {
+    registerHotkeys();
+  }
 
   // 로그인 상태 확인 후 적절한 창 열기
   const config = await loadRuntimeConfig(baseDir);
@@ -629,16 +697,16 @@ app.on("before-quit", async () => {
   globalShortcut.unregisterAll();
   stopLockCheckInterval();
   leaveSeatDetector.stop();
-  observer.stop();
-  await guard.stop();
+  observer?.stop();
+  await guard?.stop();
 });
 
-// FR-08: 비정상 종료 시 서버에 CRASH_DETECTED 보고
+// FR-08: 비정상 종료 시 서버에 CRASH_DETECTED 보고 (whenReady 이전에는 observer 미초기화)
 process.on("uncaughtException", (err) => {
-  void observer.reportCrash(err).then(() => process.exit(1));
+  void observer?.reportCrash(err).then(() => process.exit(1));
 });
 process.on("unhandledRejection", (reason) => {
-  void observer.reportCrash(String(reason)).then(() => process.exit(1));
+  void observer?.reportCrash(String(reason)).then(() => process.exit(1));
 });
 
 ipcMain.handle("pcoff:getAppState", async () => machine.getSnapshot());

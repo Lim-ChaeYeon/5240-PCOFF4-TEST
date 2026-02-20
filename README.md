@@ -30,7 +30,7 @@ npm run dist:win
 ```
 
 - **출력 위치**: `release/` 폴더  
-  - `5240 PcOff Agent Setup 0.1.0.exe` — 설치 프로그램  
+  - `5240 PcOff Agent Setup x.x.x.exe` — 설치 프로그램 (버전은 `package.json`의 `version`)  
   - `latest.yml` — 자동 업데이트용 메타데이터
 - **아키텍처**:  
   - Mac에서 실행 시 **Windows ARM64**용이 생성됩니다 (Windows on ARM 기기용).  
@@ -49,7 +49,7 @@ npm run dist:win
 | **Mac** | `5240 PcOff Agent-x.x.x.dmg` (또는 `.zip`) | Apple Silicon·Intel 맥 모두. .dmg 열어서 앱을 Applications로 드래그. **서명·notarization 없으면** 첫 실행 시 Gatekeeper 경고가 나옵니다. → [맥 설치 파일 실행 안 될 때](docs/맥_설치_가이드.md) 참고. |
 
 - 위 파일은 **Releases** 탭에서 해당 버전(태그)을 누르면 내려받을 수 있습니다.
-- 설치 후 앱은 GitHub Release를 보고 **업데이트**합니다. (앱 안 **「업데이트 확인」** 버튼으로 확인 → 다운로드 → 앱 종료 시 적용. 자세한 흐름은 [docs/업데이트_가이드_사용자.md](docs/업데이트_가이드_사용자.md) 참고.)
+- 설치 후 앱은 GitHub Release를 보고 **업데이트**합니다. (앱 시작 시 백그라운드 검사 + **「업데이트 확인」** 버튼, 다운로드 후 **앱 종료 시** 자동 적용. 자세한 흐름은 [docs/업데이트_가이드_사용자.md](docs/업데이트_가이드_사용자.md) 참고.)
 - **Mac**: 현재 CI 빌드는 **Apple 코드 서명·notarization을 하지 않습니다.** 테스트/내부용으로는 아래 가이드대로 "열기" 허용 후 사용하고, 정식 배포 시에는 Apple Developer 계정으로 서명·notarization을 설정해야 합니다.
 
 ---
@@ -96,7 +96,7 @@ npm run dist:win
 - **설정됨**: `package.json`의 `publish`가 `"provider": "github"`로 되어 있어, 설치된 앱이 **GitHub Release**에서 새 버전을 확인합니다.
 - **필수**: `package.json`의 `repository.url`에서 **YOUR_ORG**를 실제 GitHub 조직(또는 사용자명), **PCOFF_TEST**를 실제 저장소 이름으로 바꾸세요.  
   예: `https://github.com/tigris5240/PCOFF_TEST.git`
-- **동작**: 태그 푸시(또는 웹에서 릴리스 생성) → CI가 빌드해 Release에 `.exe`·`latest.yml` 업로드 → 사용자 PC의 앱이 재시작 시 또는 업데이트 확인 시 새 버전을 받아 자동 적용합니다.
+- **동작**: 태그 푸시 시 CI가 **태그 버전으로 package.json version 갱신 후** 빌드해 Release에 업로드. 사용자 앱은 **시작 시 자동 검사** + 수동 「업데이트 확인」, 다운로드 후 **종료 시** 자동 적용.
 
 ---
 
@@ -124,13 +124,13 @@ npm run dist:win
 npm start
 ```
 
-- 로그인 정보가 없으면 **로그인 화면**이 먼저 표시됩니다.
+- **로그인 정보**(`state.json`의 `userServareaId`·`userStaffId`)가 있으면 **에이전트(작동정보/잠금) 화면**으로, 없으면 **로그인 화면**으로 시작합니다.
 - 로그인 후 **메인(잠금) 화면**에서 근태정보 조회, 임시연장/긴급사용/PC-ON/PC-OFF 동작을 확인할 수 있습니다.
 
 #### 2. 로그인 화면부터 테스트하려면
 
-- `config.json`에서 `userServareaId`, `userStaffId`를 제거하거나, `config.login-test.json` 내용으로 덮어쓴 뒤 실행.
-- 또는 프로젝트 루트의 `state.json` 삭제(또는 이름 변경) 후 `npm start`.
+- 프로젝트 루트의 **`state.json`** 삭제(또는 이름 변경) 후 `npm start`. (로그인 정보는 state.json에서만 읽습니다.)
+- 설치 앱: userData 폴더의 `state.json` 삭제. (Windows: `%APPDATA%\5240 PcOff Agent\`, Mac: `~/Library/Application Support/5240 PcOff Agent/`)
 
 자세한 절차는 [docs/로그인_테스트.md](docs/로그인_테스트.md) 참고.
 
@@ -184,7 +184,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 
 ## 이미 구현된 것
 
-- **로그인**: 2단계(전화번호 → 서비스영역 선택 → 계정·비밀번호), `state.json` 저장, 에러 메시지 디코딩. **Enter 키**로 다음/로그인 가능.
+- **로그인**: 2단계(전화번호 → 서비스영역 선택 → 계정·비밀번호), **로그인 정보는 state.json에서만** 사용(config.json fallback 없음). 설치 앱 첫 실행 시 apiBaseUrl만 복사·기존 config 로그인 필드 마이그레이션 제거. **Enter 키**로 다음/로그인 가능.
 - **단일 창(mainWindow)**: 작동정보·로그인·잠금화면을 **한 창에서 전환** (새 창 없이 동일 창에서 화면만 변경).
 - **잠금화면 닫기 방지 (FR-07·FR-18 보완)**: `currentScreen` 상태 기반 분기. 잠금 중 X 버튼 완전 차단(`preventDefault`), 작동정보 창은 트레이로 숨김, 로그인 창은 일반 닫기 허용. ✅
 - **로그아웃·작동정보·잠금화면**: 전역 핫키(Cmd+Shift+L/I/K, Ctrl+Shift+L/I/K). 잠금화면 중에도 로그아웃 핫키 동작(close 우회). 로그인 후 잠금 필요 시 같은 창에서 잠금화면으로 전환.
@@ -194,7 +194,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **로컬 이석/절전 감지 (FR-11)**: `app/core/leave-seat-detector.ts`. 유휴(Idle): `powerMonitor.getSystemIdleTime()` 5초 폴링, API 정책(`leaveSeatUseYn`, `leaveSeatTime` 분) 초과 시 잠금화면. 절전: suspend 시각 기록, resume 시 경과 >= leaveSeatTime 이면 이석 잠금(감지시각=절전 시작). `getWorkTime` 응답에 로컬 이석 병합. **API 정규화**: 서버가 `leaveSeatUseYn`을 `"YES"`/`"NO"`로 내려줘도 `normalizeLeaveSeatUseYn()`으로 `"Y"`/`"N"` 변환 후 정책 적용. ✅
 - **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callCmmPcOnOffLogPrc
 - **시뮬레이터·CI**: Flow-01~08 시나리오, parity-report.json, parity-summary.md, CI 아티팩트
-- **로깅**: JSONL, TelemetryLogger, APP_START, LOGIN_SUCCESS/FAIL, UPDATE_*, AGENT_*, INSTALLER_REGISTRY_SYNC/FAIL 등 이벤트 (logcode.md 참고)
+- **로깅**: JSONL, TelemetryLogger. LOG_CODES 상수로 APP_START, LOGIN_SUCCESS/FAIL, LOGOUT, LOCK/UNLOCK_TRIGGERED, UPDATE_*, AGENT_*, INSTALLER_REGISTRY_SYNC/FAIL, TRAY_*, LEAVE_SEAT_* 등 기록 (logcode.md·constants.ts 참고) ✅
 - **자동 업데이트 (FR-03)**: `electron-updater` 기반 무확인 자동 업데이트, 재시도 큐, 진행률 UI 표시 ✅
 - **비밀번호 변경 확인 (FR-04)**: 서버 `pwdChgYn=Y` 감지 시 확인 전용 모달, 검증/재로그인 없음 ✅
 - **Agent Guard (FR-07)**: 무결성 체크(SHA-256), 파일 감시, 탐지 시 로그·복구 트리거, IPC 연동 ✅
@@ -214,8 +214,8 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 | ~~-~~ | ~~설치자 레지스트리~~ | ~~설치자 정보 서버 등록·조회 (FR-09, Flow-08)~~ **완료** ✅ |
 | ~~-~~ | ~~잠금화면·에이전트 창 닫기 방지~~ | ~~창 X버튼/닫기 차단 (FR-07·FR-18 보완)~~ **완료** ✅ |
 | ~~1~~ | ~~이석 감지·해제 플로우~~ | Idle/절전 기반 이석 감지, 사유 입력, 휴게시간 예외 (FR-11, Flow-09) **완료** ✅ |
-| 2 | 로그 코드 전수 반영 | logcode.md와 필수 이벤트 매핑 (PRD §7) |
-| 3 | 패키징·플랫폼 검증 | Windows/Mac CI 빌드·Release **완료** ✅. 코드 서명·notarization 별도 (NFR-01, DoD) |
+| ~~2~~ | ~~로그 코드 전수 반영~~ | logcode.md와 constants.ts 동기화, LOG_CODES 상수 통합 **완료** ✅ |
+| 3 | 패키징·플랫폼 검증 | Windows/Mac CI 빌드·Release **완료** ✅. 코드 서명·notarization은 **마지막에 진행** (NFR-01, DoD) |
 | 4 | 인스톨/언인스톨 정책 | 설치자 식별, 무결성 기준선, 삭제 방지 (FR-19) |
 | 5 | 프로세스 Kill 통제 | 사용자 Kill 차단, OTP 승인 (FR-18) |
 | 6 | 오프라인 복구·잠금 | 30분 유예, 오프라인 잠금, 복구 시도 (FR-17, Flow-13) |

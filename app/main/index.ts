@@ -253,7 +253,7 @@ async function createTrayInfoWindow(): Promise<void> {
       win.focus();
     }
   });
-  void logger.write("TRAY_INFO_OPENED", "INFO", {});
+  void logger.write(LOG_CODES.TRAY_INFO_OPENED, "INFO", {});
   } catch (err) {
     console.error("[PCOFF] createTrayInfoWindow failed:", err);
   }
@@ -331,7 +331,7 @@ async function doGlobalLogout(): Promise<void> {
   await clearLoginState(baseDir);
   lastWorkTimeData = {};
   lastWorkTimeFetchedAt = null;
-  await logger.write("LOGOUT", "INFO", { source: "globalShortcut" });
+  await logger.write(LOG_CODES.LOGOUT, "INFO", { source: "globalShortcut" });
   createLoginWindow();
 }
 
@@ -462,7 +462,7 @@ function setOperationMode(mode: OperationMode): void {
   if (currentMode === mode) return;
   const prevMode = currentMode;
   currentMode = mode;
-  void logger.write("TRAY_MODE_CHANGED", "INFO", { from: prevMode, to: mode });
+  void logger.write(LOG_CODES.TRAY_MODE_CHANGED, "INFO", { from: prevMode, to: mode });
   updateTrayMenu();
   
   // 모드 변경 시 모든 창에 알림
@@ -510,14 +510,14 @@ async function checkLockAndShowLockWindow(reuseWindow?: BrowserWindow | null): P
   if (!locked) return false;
   if (reuseWindow && !reuseWindow.isDestroyed()) {
     showLockInWindow(reuseWindow);
-    void logger.write("LOCK_TRIGGERED", "INFO", { reason: "usage_time_ended" });
+    void logger.write(LOG_CODES.LOCK_TRIGGERED, "INFO", { reason: "usage_time_ended" });
     return true;
   }
   createLockWindow();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
-    void logger.write("LOCK_TRIGGERED", "INFO", { reason: "usage_time_ended" });
+    void logger.write(LOG_CODES.LOCK_TRIGGERED, "INFO", { reason: "usage_time_ended" });
   }
   return true;
 }
@@ -833,7 +833,7 @@ ipcMain.handle(
         posNm: res.posNm,
         corpNm: res.corpNm
       });
-      await logger.write("LOGIN_SUCCESS", "INFO", { loginUserId: payload.loginUserId });
+      await logger.write(LOG_CODES.LOGIN_SUCCESS, "INFO", { loginUserId: payload.loginUserId });
       return {
         success: true,
         userServareaId,
@@ -841,7 +841,7 @@ ipcMain.handle(
         loginUserNm: res.loginUserNm
       };
     } catch (error) {
-      await logger.write("LOGIN_FAIL", "WARN", { error: String(error) });
+      await logger.write(LOG_CODES.LOGIN_FAIL, "WARN", { error: String(error) });
       return { success: false, error: String(error) };
     }
   }
@@ -851,7 +851,7 @@ ipcMain.handle("pcoff:logout", async () => {
   await clearLoginState(baseDir);
   lastWorkTimeData = {};
   lastWorkTimeFetchedAt = null;
-  await logger.write("LOGOUT", "INFO", {});
+  await logger.write(LOG_CODES.LOGOUT, "INFO", {});
   return { success: true };
 });
 ipcMain.handle("pcoff:getWorkTime", async () => {
@@ -924,7 +924,7 @@ ipcMain.handle("pcoff:requestPcExtend", async (_event, payload: { pcOffYmdTime?:
   try {
     const pcOffYmdTime = payload.pcOffYmdTime ?? buildMockWorkTime().pcOffYmdTime ?? "";
     const data = await api.callPcOffTempDelay(pcOffYmdTime);
-    await logger.write("UNLOCK_TRIGGERED", "INFO", { action: "pc_extend", pcOffYmdTime });
+    await logger.write(LOG_CODES.UNLOCK_TRIGGERED, "INFO", { action: "pc_extend", pcOffYmdTime });
     setOperationMode("TEMP_EXTEND");
     const workTime = await api.getPcOffWorkTime();
     lastWorkTimeData = workTime as unknown as Record<string, unknown>;
@@ -942,7 +942,7 @@ ipcMain.handle("pcoff:requestEmergencyUse", async (_event, payload: { reason: st
   if (!api) return { source: "mock", success: true };
   try {
     const data = await api.callPcOffEmergencyUse({ reason: payload.reason || "긴급사용 요청" });
-    await logger.write("UNLOCK_TRIGGERED", "INFO", { action: "emergency_use" });
+    await logger.write(LOG_CODES.UNLOCK_TRIGGERED, "INFO", { action: "emergency_use" });
     // 긴급사용 성공 시 잠금 해제 → 작동정보 화면으로 전환
     createTrayInfoWindow();
     return { source: "api", success: true, data };
@@ -1068,7 +1068,7 @@ ipcMain.handle("pcoff:refreshMyAttendance", async () => {
     const data = await api.getPcOffWorkTime();
     lastWorkTimeData = data as unknown as Record<string, unknown>;
     lastWorkTimeFetchedAt = new Date().toISOString();
-    await logger.write("TRAY_ATTENDANCE_REFRESHED", "INFO", {});
+    await logger.write(LOG_CODES.TRAY_ATTENDANCE_REFRESHED, "INFO", {});
     return data;
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "refreshMyAttendance", error: String(error) });

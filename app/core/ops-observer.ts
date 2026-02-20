@@ -156,6 +156,6 @@ export class OpsObserver {
    * 설치자 레지스트리 동기화 (로컬 로그 + 큐 적재)
    */
   async syncInstallerRegistry(installerId: string): Promise<void> {
-    await this.logger.write("INSTALLER_REGISTRY_SYNC", "INFO", { installerId });
+    await this.logger.write(LOG_CODES.INSTALLER_REGISTRY_SYNC, "INFO", { installerId });
   }
 }

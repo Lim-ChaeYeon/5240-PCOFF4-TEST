@@ -3,7 +3,7 @@
 Electron 앱에서 사용하는 로그 코드 매핑.  
 레거시 `5240.PcOff-master/docs/logcode.md`와 동기화하며, `app/core/constants.ts`의 `LOG_CODES`와 일치시킨다.
 
-**Last Updated**: 2026-02-19
+**Last Updated**: 2026-02-20
 
 ---
 
@@ -71,6 +71,7 @@ Electron 앱에서 사용하는 로그 코드 매핑.
 | INSTALL_FAIL | 설치 실패 | |
 | INSTALL_ROLLBACK | 설치 롤백 | 실패 시 이전 상태 복원 |
 | INSTALLER_REGISTRY_SYNC | 설치자 레지스트리 동기화 | |
+| INSTALLER_REGISTRY_FAIL | 설치자 레지스트리 동기화 실패 | |
 | UNINSTALL_REQUEST | 언인스톨 요청 | |
 | UNINSTALL_ATTEMPT | 언인스톨 시도 탐지 | 임의 삭제 시도 |
 | UNINSTALL_SUCCESS | 언인스톨 성공 | |

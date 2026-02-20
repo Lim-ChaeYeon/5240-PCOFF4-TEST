@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, globalShortcut } from "electron";
 import type { LeaveSeatDetectedReason } from "../core/leave-seat-detector.js";
 import { LeaveSeatDetector } from "../core/leave-seat-detector.js";
-import { existsSync } from "node:fs";
+import { existsSync, copyFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_NAME, LOG_CODES } from "../core/constants.js";
@@ -540,6 +540,20 @@ app.whenReady().then(async () => {
   app.setName(APP_NAME);
   // 설치 앱: userData 사용(개발 시 state와 분리). 개발: process.cwd()
   baseDir = app.isPackaged ? app.getPath("userData") : process.cwd();
+  // 설치 앱 첫 실행: userData에 config 없으면 번들(extraResources) config 복사 → API 주소 설정 오류 방지
+  if (app.isPackaged) {
+    const userConfigPath = join(baseDir, "config.json");
+    const bundledConfigPath = join(process.resourcesPath, "config.json");
+    if (!existsSync(userConfigPath) && existsSync(bundledConfigPath)) {
+      try {
+        mkdirSync(baseDir, { recursive: true });
+        copyFileSync(bundledConfigPath, userConfigPath);
+        console.info("[PCOFF] config.json copied from bundle to userData");
+      } catch (e) {
+        console.warn("[PCOFF] Failed to copy config from bundle:", e);
+      }
+    }
+  }
   logger = new TelemetryLogger(baseDir, machine.getSessionId(), process.platform);
   updater = new UpdateManager(baseDir, logger);
   observer = new OpsObserver(logger, () => getApiBaseUrl(baseDir));

@@ -219,6 +219,25 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   });
 }
 
+/** 창 포커스 시에도 핫키 동작하도록 before-input-event로 처리 (globalShortcut은 창 포커스 시 미동작할 수 있음) */
+function attachWindowHotkeys(win: BrowserWindow): void {
+  win.webContents.on("before-input-event", (event, input) => {
+    const mod = input.control || input.meta;
+    if (!mod || !input.shift) return;
+    const key = input.key?.toLowerCase();
+    if (key === "i") {
+      event.preventDefault();
+      void createTrayInfoWindow();
+    } else if (key === "k") {
+      event.preventDefault();
+      createLockWindow();
+    } else if (key === "l") {
+      event.preventDefault();
+      void doGlobalLogout();
+    }
+  });
+}
+
 /**
  * 트레이에서 열리는 에이전트 정보 화면 (main.html)
  * 버튼 없이 정보 조회만 가능.
@@ -267,6 +286,7 @@ async function createTrayInfoWindow(): Promise<void> {
   mainWindow = win;
   currentScreen = "tray-info";
   attachMainWindowCloseHandler(win);
+  attachWindowHotkeys(win);
   win.once("ready-to-show", () => {
     win.show();
     win.focus();
@@ -325,6 +345,7 @@ function createLockWindow(): void {
   mainWindow = win;
   currentScreen = "lock";
   attachMainWindowCloseHandler(win);
+  attachWindowHotkeys(win);
   loadRendererInWindow(win, "lock.html");
 }
 
@@ -401,6 +422,7 @@ function createLoginWindow(): void {
   mainWindow = win;
   currentScreen = "login";
   attachMainWindowCloseHandler(win);
+  attachWindowHotkeys(win);
   loadRendererInWindow(win, "index.html");
 }
 

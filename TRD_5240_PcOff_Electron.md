@@ -113,7 +113,7 @@ IPC 메시지는 타입과 스키마를 정의하고 검증해야 한다.
 
 * `config.json`: 설정
 * `state.json`: 상태 정보(로그인 정보 등)
-* `logs/YYYY-MM-DD.jsonl`: 일자별 로그 파일
+* `logs/YYYY-MM-DD.json`: 일자별 로그 파일
 * `guard/integrity.json`: Agent Guard 무결성 기준선 (FR-07)
 * `guard/watch-list.json`: (선택) Guard 감시 대상 파일 목록
 * `update/retry-queue.json`: 업데이트 재시도 큐

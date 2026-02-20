@@ -29,7 +29,7 @@ export class TelemetryLogger {
     const now = new Date();
     const fileDate = now.toISOString().slice(0, 10);
     const logDir = join(this.baseDir, PATHS.logsDir);
-    const logFile = join(logDir, `${fileDate}.jsonl`);
+    const logFile = join(logDir, `${fileDate}.json`);
     const entry: LogEntry = {
       timestamp: now.toISOString(),
       logCode,

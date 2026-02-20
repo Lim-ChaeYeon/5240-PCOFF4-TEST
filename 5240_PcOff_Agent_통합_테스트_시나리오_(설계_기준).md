@@ -20,7 +20,7 @@
 - 테스트 계정: 일반 사용자, 관리자(승인/OTP), 잠금해제 가능 계정
 - 네트워크 제어: 정상/지연/단절을 전환 가능한 환경
 - 앱 실행: `npm install && npm run build && npm start`
-- 로그 확인 위치: `logs/YYYY-MM-DD.jsonl`, `leave-seat-queue.jsonl`, `offline-state.json`
+- 로그 확인 위치: `logs/YYYY-MM-DD.json`, `leave-seat-queue.jsonl`, `offline-state.json`
 
 ---
 

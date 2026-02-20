@@ -87,7 +87,7 @@ alwaysApply: true
 - **Process**: Main(생명주기·업데이트·OS·무결성), Renderer(UI·화면 전환), Preload(contextIsolation 유지).
 - **모듈**: app-shell, update-manager, auth-policy, feature-core, simulator, telemetry-log, agent-guard, ops-observer. 역할은 TRD §2 참고.
 - **폴더**: `app/main`, `app/renderer`, `app/preload`, `app/core` 분리. 시뮬레이터는 `simulator/`.
-- **로컬 저장**: `config.json`, `state.json`, `logs/YYYY-MM-DD.jsonl`, `guard/integrity.json`, `update/retry-queue.json`.
+- **로컬 저장**: `config.json`, `state.json`, `logs/YYYY-MM-DD.json`, `guard/integrity.json`, `update/retry-queue.json`.
 - **상태 머신**: INIT → LOGIN_REQUIRED → AUTHENTICATED → LOCKED / UNLOCK_PENDING_REASON / TIMER_RUNNING / ALERTING / UPDATE_* / ERROR_STATE. feature-core에서 구현.
 
 ## 로깅

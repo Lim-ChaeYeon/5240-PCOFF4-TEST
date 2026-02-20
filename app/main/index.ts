@@ -202,7 +202,7 @@ async function createTrayInfoWindow(): Promise<void> {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "tray-info";
-    mainWindow.setSize(560, 760);
+    mainWindow.setSize(620, 840);
     mainWindow.setTitle("PCOFF 작동정보");
     // Windows: 먼저 창을 보이게 한 뒤 로드해 트레이 클릭 시 바로 창이 보이도록
     mainWindow.show();
@@ -217,8 +217,8 @@ async function createTrayInfoWindow(): Promise<void> {
   }
 
   const win = new BrowserWindow({
-    width: 560,
-    height: 760,
+    width: 620,
+    height: 840,
     resizable: true,
     minimizable: true,
     maximizable: false,
@@ -266,7 +266,7 @@ async function createTrayInfoWindow(): Promise<void> {
 function createLockWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "lock";
-    mainWindow.setSize(960, 640);
+    mainWindow.setSize(1040, 720);
     mainWindow.setTitle("PCOFF 잠금화면");
     mainWindow.loadFile(getRendererPath("lock.html"));
     mainWindow.show();
@@ -275,11 +275,12 @@ function createLockWindow(): void {
   }
 
   const win = new BrowserWindow({
-    width: 960,
-    height: 640,
+    width: 1040,
+    height: 720,
     resizable: false,
     minimizable: true,
-    closable: false,   // 잠금 중 닫기 버튼 비활성화
+    closable: false,
+
     fullscreenable: true,
     title: "PCOFF 잠금화면",
     webPreferences: {
@@ -299,7 +300,7 @@ function showLockInWindow(win: BrowserWindow): void {
   if (win.isDestroyed()) return;
   mainWindow = win;
   currentScreen = "lock";
-  win.setSize(960, 640);
+  win.setSize(1040, 720);
   win.setTitle("PCOFF 잠금화면");
   win.loadFile(getRendererPath("lock.html"));
   win.show();
@@ -341,7 +342,7 @@ async function doGlobalLogout(): Promise<void> {
 function createLoginWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "login";
-    mainWindow.setSize(480, 560);
+    mainWindow.setSize(520, 620);
     mainWindow.setTitle("PCOFF 로그인");
     mainWindow.loadFile(getRendererPath("index.html"));
     mainWindow.show();
@@ -350,8 +351,8 @@ function createLoginWindow(): void {
   }
 
   const win = new BrowserWindow({
-    width: 480,
-    height: 560,
+    width: 520,
+    height: 620,
     resizable: false,
     title: "PCOFF 로그인",
     webPreferences: {
@@ -542,11 +543,11 @@ app.whenReady().then(async () => {
   app.setName(APP_NAME);
   // 설치 앱: userData 사용(개발 시 state와 분리). 개발: process.cwd()
   baseDir = app.isPackaged ? app.getPath("userData") : process.cwd();
-  // 설치 앱 첫 실행: userData에 config 없으면 번들에서 apiBaseUrl만 가져옴 (로그인 정보는 복사하지 않음)
   if (app.isPackaged) {
     const userConfigPath = join(baseDir, "config.json");
     const bundledConfigPath = join(process.resourcesPath, "config.json");
     if (!existsSync(userConfigPath) && existsSync(bundledConfigPath)) {
+      // 첫 실행: 번들에서 apiBaseUrl만 가져옴
       try {
         mkdirSync(baseDir, { recursive: true });
         const raw = readFileSync(bundledConfigPath, "utf-8");
@@ -558,6 +559,17 @@ app.whenReady().then(async () => {
       } catch (e) {
         console.warn("[PCOFF] Failed to create config from bundle:", e);
       }
+    } else if (existsSync(userConfigPath)) {
+      // 기존 설치: config.json에 로그인 정보가 남아 있으면 제거 (마이그레이션)
+      try {
+        const raw = readFileSync(userConfigPath, "utf-8");
+        const cfg = JSON.parse(raw) as Record<string, unknown>;
+        if (cfg.userServareaId || cfg.userStaffId) {
+          const { userServareaId: _a, userStaffId: _b, ...clean } = cfg;
+          writeFileSync(userConfigPath, JSON.stringify(clean, null, 2), "utf-8");
+          console.info("[PCOFF] config.json: stale login fields removed (migration)");
+        }
+      } catch { /* ignore parse errors */ }
     }
   }
   logger = new TelemetryLogger(baseDir, machine.getSessionId(), process.platform);

@@ -201,9 +201,11 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **Agent Guard (FR-07)**: 무결성 체크(SHA-256), 파일 감시, 탐지 시 로그·복구 트리거, IPC 연동 ✅
 - **Ops Observer (FR-08)**: heartbeat·로그 배치 서버 전송(`/reportAgentEvents.do`), 크래시/오프라인 보고 ✅
 - **에이전트 UI·잠금화면 분리**: 트레이 작동정보(`main.html`), 잠금화면(`lock.html`), 로그인(`index.html`) — 단일 창에서 전환, 시스템 트레이 메뉴, 운영 모드 관리 ✅
-- **트레이 아이콘**: `scripts/create-tray-icon.mjs`로 16×16 PNG 생성(postbuild), macOS `setTemplateImage` 적용. 파일 없을 때 Base64 fallback.
-- **CI·릴리스 (패키징)**: 태그 푸시(v*) 시 GitHub Actions로 Windows x64·Mac 빌드 후 GitHub Release 업로드. Windows → .exe, Mac → .dmg/.zip. ✅
-- **자동 업데이트 (GitHub)**: `publish.provider: "github"` — 설치된 앱이 GitHub Release에서 새 버전 확인·자동 적용. ✅
+- **트레이 아이콘**: `assets/tray-icon.png`(16×16, 5240 로고 스타일). extraResources로 복사·resourcesPath 우선 로드. 파일 없을 때 postbuild 생성·Base64 fallback. macOS setTemplateImage.
+- **CI·릴리스 (패키징)**: 태그 푸시(v*) 시 GitHub Actions로 Windows x64·Mac 빌드 후 GitHub Release 업로드. Release 자산은 `latest.yml`/`latest-mac.yml` 등 경로 없이 업로드되어 electron-updater가 인식. Windows → .exe, Mac → .dmg/.zip. ✅
+- **자동 업데이트 (GitHub)**: `publish.provider: "github"`, owner/repo 명시 — 설치된 앱이 GitHub Release에서 새 버전 확인·자동 적용. ✅
+- **업데이트 확인**: 로그인 화면 + **작동정보 화면**(버전정보 펼치기)에 "업데이트 확인" 버튼. 클릭 시 확인·다운로드·상태 메시지·토스트 표시. ✅
+- **버전정보·로그**: 버전정보의 "조회 시각"은 정보 조회 시각. "로그 폴더 열기"로 userData 내 로그 폴더 생성 후 열기. 앱 시작 시 `userData/logs` 폴더 생성. ✅
 - **푸시 용량 초과 해결**: `release/` .gitignore, 히스토리에서 제거 방법은 [docs/깃_푸시_용량초과_해결.md](docs/깃_푸시_용량초과_해결.md) 참고. ✅
 
 ---
@@ -246,4 +248,5 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - [docs/윈도우_설치_테스트_가이드.md](docs/윈도우_설치_테스트_가이드.md) — Windows 설치 파일 빌드·설치·실행 테스트 방법
 - [docs/맥_설치_가이드.md](docs/맥_설치_가이드.md) — Mac 설치 파일 "열 수 없음" / Gatekeeper 경고 시 실행 방법
 - [docs/업데이트_가이드_사용자.md](docs/업데이트_가이드_사용자.md) — 이미 설치한 사용자용 업데이트 확인·적용 방법
+- [docs/잠금_및_적용정책_설명.md](docs/잠금_및_적용정책_설명.md) — 적용 정책(표시용)·잠금 화면 트리거(pcOnYn)·트레이 아이콘 안내
 - [docs/operations/logcode.md](docs/operations/logcode.md) — 로그 코드 매핑

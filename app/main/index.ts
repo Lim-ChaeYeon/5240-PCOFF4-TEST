@@ -4,7 +4,7 @@ import { LeaveSeatDetector } from "../core/leave-seat-detector.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { APP_NAME, LOG_CODES } from "../core/constants.js";
+import { APP_NAME, LOG_CODES, PATHS } from "../core/constants.js";
 
 // ESM에서 __dirname 대체
 const __filename = fileURLToPath(import.meta.url);
@@ -385,9 +385,18 @@ function createLoginWindow(): void {
   win.loadFile(getRendererPath("index.html"));
 }
 
-/** 트레이용 fallback 아이콘 (16x16, 단색) — assets/tray-icon.png 없을 때 사용. 맥 메뉴 막대에 보이도록 */
-const TRAY_FALLBACK_ICON_DATA =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHklEQVQ4T2NkYGD4z0ABYBw1gGE0DBgGNAwYpjQMAPEGA0sH0bTnAAAAAElFTkSuQmCC";
+/** 트레이용 fallback: 16x16 밝은 색(어두운 작업표시줄에서도 보이도록) */
+function createTrayFallbackIcon(): Electron.NativeImage {
+  const size = 16;
+  const buf = Buffer.alloc(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    buf[i * 4] = 0xc0;
+    buf[i * 4 + 1] = 0xc0;
+    buf[i * 4 + 2] = 0xc0;
+    buf[i * 4 + 3] = 255;
+  }
+  return nativeImage.createFromBuffer(buf, { width: size, height: size });
+}
 
 /**
  * 시스템 트레이 생성
@@ -395,18 +404,33 @@ const TRAY_FALLBACK_ICON_DATA =
 function createTray(): void {
   if (tray) return;
 
-  // 트레이 아이콘 (설치 앱: app.getAppPath() 기준, 없으면 fallback)
+  // 트레이 아이콘 (Windows 패키징 시 app.asar 내 경로가 비어 보일 수 있음 → extraResources로 복사한 경로 우선)
   const appPath = app.getAppPath();
-  const iconCandidates = app.isPackaged
-    ? [join(appPath, "assets/tray-icon.png"), join(__dirname, "../../../assets/tray-icon.png")]
+  const resourcesPath = process.resourcesPath;
+  const baseCandidates = app.isPackaged
+    ? [
+        join(resourcesPath, "assets", "tray-icon.png"),
+        join(appPath, "assets", "tray-icon.png"),
+        join(__dirname, "../../../assets/tray-icon.png")
+      ]
     : [join(__dirname, "../../../assets/tray-icon.png"), join(process.cwd(), "assets/tray-icon.png")];
+  // Windows: ICO 권장(다중 해상도 포함 시 트레이 표시 안정)
+  const winIco =
+    process.platform === "win32"
+      ? [
+          join(resourcesPath, "assets", "icon.ico"),
+          join(appPath, "assets", "icon.ico"),
+          join(__dirname, "../../../assets/icon.ico")
+        ]
+      : [];
+  const iconCandidates = [...baseCandidates, ...winIco];
   const iconPath = iconCandidates.find((p) => existsSync(p));
   let icon: Electron.NativeImage;
   if (iconPath) {
     icon = nativeImage.createFromPath(iconPath);
-    if (icon.isEmpty()) icon = nativeImage.createFromDataURL(TRAY_FALLBACK_ICON_DATA);
+    if (icon.isEmpty()) icon = createTrayFallbackIcon();
   } else {
-    icon = nativeImage.createFromDataURL(TRAY_FALLBACK_ICON_DATA);
+    icon = createTrayFallbackIcon();
   }
 
   // 맥 메뉴 막대: 단색 아이콘을 템플릿으로 쓰면 라이트/다크 자동 반전
@@ -566,6 +590,10 @@ app.whenReady().then(async () => {
   app.setName(APP_NAME);
   // 설치 앱: userData 사용(개발 시 state와 분리). 개발: process.cwd()
   baseDir = app.isPackaged ? app.getPath("userData") : process.cwd();
+  // 로그·설정 폴더가 없으면 생성 (폴더 경로 확인 시 해당 경로가 존재하도록)
+  try {
+    mkdirSync(join(baseDir, PATHS.logsDir), { recursive: true });
+  } catch { /* ignore */ }
   if (app.isPackaged) {
     const userConfigPath = join(baseDir, "config.json");
     const bundledConfigPath = join(process.resourcesPath, "config.json");
@@ -808,6 +836,13 @@ ipcMain.handle("pcoff:requestUpdateCheck", async () => {
 });
 ipcMain.handle("pcoff:getUpdateStatus", async () => updater.getStatus());
 ipcMain.handle("pcoff:getAppVersion", async () => updater.getAppVersion());
+ipcMain.handle("pcoff:getLogsPath", () => join(baseDir, PATHS.logsDir));
+ipcMain.handle("pcoff:openLogsFolder", async () => {
+  const path = join(baseDir, PATHS.logsDir);
+  mkdirSync(path, { recursive: true });
+  await shell.openPath(path);
+  return { ok: true };
+});
 
 const LOGIN_PLACEHOLDERS = ["REPLACE_WITH_SERVAREA_ID", "REPLACE_WITH_STAFF_ID"];
 function isRealLoginId(value: string | undefined): boolean {

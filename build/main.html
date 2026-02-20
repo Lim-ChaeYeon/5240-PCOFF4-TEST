@@ -217,11 +217,12 @@
 
           <div class="divider"></div>
 
-          <!-- 버전정보: 기본은 한 줄, 상세보기 클릭 시 펼침 -->
+          <!-- 버전정보: 기본은 한 줄, 상세보기·업데이트 확인 -->
           <div class="section-header">
             <span class="section-title">버전정보</span>
             <div class="section-header-right">
               <span id="version-summary" class="version-summary">-</span>
+              <button type="button" id="check-update" class="refresh-btn">업데이트 확인</button>
               <button type="button" id="version-toggle" class="refresh-btn" aria-expanded="false">상세보기</button>
             </div>
           </div>
@@ -231,8 +232,11 @@
               <span id="version-app" class="status-value">-</span>
             </div>
             <div class="status-row">
-              <span class="status-label">마지막 업데이트</span>
+              <span class="status-label">조회 시각</span>
               <span id="version-updated" class="status-value">-</span>
+            </div>
+            <div class="status-row">
+              <button type="button" id="open-logs-folder" class="refresh-btn">로그 폴더 열기</button>
             </div>
           </div>
         </section>

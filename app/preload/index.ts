@@ -73,6 +73,8 @@ const api = {
   requestUpdateCheck: () => ipcRenderer.invoke("pcoff:requestUpdateCheck") as Promise<UpdateStatus>,
   getUpdateStatus: () => ipcRenderer.invoke("pcoff:getUpdateStatus") as Promise<UpdateStatus>,
   getAppVersion: () => ipcRenderer.invoke("pcoff:getAppVersion") as Promise<string>,
+  getLogsPath: () => ipcRenderer.invoke("pcoff:getLogsPath") as Promise<string>,
+  openLogsFolder: () => ipcRenderer.invoke("pcoff:openLogsFolder") as Promise<{ ok: boolean }>,
   onUpdateProgress: (callback: (data: { percent: number }) => void) => {
     const handler = (_event: IpcRendererEvent, data: { percent: number }) => callback(data);
     ipcRenderer.on("pcoff:update-progress", handler);

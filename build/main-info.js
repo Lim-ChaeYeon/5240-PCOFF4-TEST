@@ -24,6 +24,7 @@ const versionUpdatedEl = document.getElementById("version-updated");
 const versionSummaryEl = document.getElementById("version-summary");
 const versionDetailEl = document.getElementById("version-detail");
 const versionToggleEl = document.getElementById("version-toggle");
+const checkUpdateEl = document.getElementById("check-update");
 const dateTextEl = document.getElementById("date-text");
 const timeTextEl = document.getElementById("time-text");
 const toastEl = document.getElementById("toast");
@@ -40,6 +41,46 @@ function showToast(text) {
   toastEl.textContent = text;
   toastEl.classList.add("show");
   setTimeout(() => toastEl.classList.remove("show"), 1400);
+}
+
+/** 업데이트 확인 결과에 따라 버튼 텍스트·토스트 표시 */
+function updateCheckButton(status) {
+  if (!checkUpdateEl) return;
+  const s = status?.state ?? "idle";
+  switch (s) {
+    case "checking":
+      checkUpdateEl.textContent = "확인 중...";
+      checkUpdateEl.disabled = true;
+      break;
+    case "available":
+      checkUpdateEl.textContent = `v${status?.version ?? "?"} 다운로드 중`;
+      checkUpdateEl.disabled = true;
+      break;
+    case "downloading":
+      checkUpdateEl.textContent = `다운로드 ${Math.round(status?.progress ?? 0)}%`;
+      checkUpdateEl.disabled = true;
+      break;
+    case "downloaded":
+      checkUpdateEl.textContent = "재시작 대기";
+      checkUpdateEl.disabled = true;
+      showToast("업데이트 다운로드 완료. 앱 종료 후 적용됩니다.");
+      break;
+    case "not-available":
+      checkUpdateEl.textContent = "최신 버전";
+      checkUpdateEl.disabled = false;
+      showToast("현재 최신 버전입니다.");
+      setTimeout(() => { checkUpdateEl.textContent = "업데이트 확인"; }, 3000);
+      break;
+    case "error":
+      checkUpdateEl.textContent = "업데이트 오류";
+      checkUpdateEl.disabled = false;
+      showToast(status?.error || "업데이트 확인 실패");
+      setTimeout(() => { checkUpdateEl.textContent = "업데이트 확인"; }, 3000);
+      break;
+    default:
+      checkUpdateEl.textContent = "업데이트 확인";
+      checkUpdateEl.disabled = false;
+  }
 }
 
 function updateClock() {
@@ -242,6 +283,44 @@ async function init() {
 
   refreshAttendanceEl?.addEventListener("click", () => refreshAttendance({ silent: false }));
   setupModeChangeListener();
+
+  // 업데이트 확인 버튼 (작동정보 화면)
+  if (checkUpdateEl && window.pcoffApi?.requestUpdateCheck) {
+    checkUpdateEl.addEventListener("click", async () => {
+      checkUpdateEl.disabled = true;
+      checkUpdateEl.textContent = "확인 중...";
+      try {
+        const status = await window.pcoffApi.requestUpdateCheck();
+        updateCheckButton(status);
+      } catch (e) {
+        console.warn("requestUpdateCheck failed", e);
+        showToast("업데이트 확인 오류");
+        checkUpdateEl.disabled = false;
+        checkUpdateEl.textContent = "업데이트 확인";
+      }
+    });
+    if (window.pcoffApi.onUpdateProgress) {
+      window.pcoffApi.onUpdateProgress((data) => {
+        if (checkUpdateEl && data.progress != null) {
+          checkUpdateEl.textContent = `다운로드 ${Math.round(data.progress)}%`;
+        }
+      });
+    }
+  }
+
+  // 로그 폴더 열기
+  const openLogsFolderEl = document.getElementById("open-logs-folder");
+  if (openLogsFolderEl && window.pcoffApi?.openLogsFolder) {
+    openLogsFolderEl.addEventListener("click", async () => {
+      try {
+        await window.pcoffApi.openLogsFolder();
+        showToast("로그 폴더를 열었습니다.");
+      } catch (e) {
+        console.warn("openLogsFolder failed", e);
+        showToast("로그 폴더를 열 수 없습니다.");
+      }
+    });
+  }
 
   // 버전정보 상세보기 토글
   versionToggleEl?.addEventListener("click", () => {

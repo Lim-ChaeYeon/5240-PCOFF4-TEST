@@ -110,12 +110,17 @@ jobs:
         run: |
           rm -f win-x64/builder-debug.yml mac/builder-debug.yml 2>/dev/null || true
 
+      # 태그 푸시 직후 API 반영·일시 오류 완화
+      - name: Wait before release
+        run: sleep 20
+
       - name: Create GitHub Release (essential files only)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           draft: false
+          generate_release_notes: false
           files: |
             win-x64/*.exe
             win-x64/*.yml

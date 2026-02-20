@@ -1,3 +1,6 @@
+/** 잠금화면 종류: before=시업 전, off=종업, empty=이석 */
+export type ScreenType = "before" | "off" | "empty";
+
 export interface WorkTimeResponse {
   pcOnYn?: "Y" | "N";
   pcOnYmdTime?: string;
@@ -18,6 +21,10 @@ export interface WorkTimeResponse {
   pwdChgYn?: "Y" | "N";
   /** 비밀번호 변경 메시지 */
   pwdChgMsg?: string;
+  /** 서버가 내려준 화면 유형(시업 전/종업/이석). 클라이언트에서 exCountRenewal로 재계산할 수 있음 */
+  screenType?: ScreenType | string;
+  /** 일자변경 시각(옵션 1227). YYYYMMDDHH24MI. now < exCountRenewal → 종업화면(off), now >= exCountRenewal → 시업화면(before) */
+  exCountRenewal?: string;
 }
 
 export interface ApiClientConfig {

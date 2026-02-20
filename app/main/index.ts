@@ -16,6 +16,7 @@ import { OpsObserver } from "../core/ops-observer.js";
 import { AuthPolicy } from "../core/auth-policy.js";
 import { AgentGuard } from "../core/agent-guard.js";
 import { PcOffApiClient, PcOffAuthClient, type WorkTimeResponse } from "../core/api-client.js";
+import { resolveScreenType } from "../core/screen-display-logic.js";
 import {
   loadRuntimeConfig,
   getApiBaseUrl,
@@ -49,6 +50,12 @@ let lastWorkTimeFetchedAt: string | null = null;
 let localLeaveSeatDetectedAt: Date | null = null;
 let localLeaveSeatReason: LeaveSeatDetectedReason | null = null;
 const leaveSeatDetector = new LeaveSeatDetector();
+
+/** FR-13: exCountRenewal(옵션 1227) 기준으로 시업/종업 화면 타입 적용 */
+function applyResolvedScreenType(work: Record<string, unknown>): void {
+  if (Object.keys(work).length === 0) return;
+  work.screenType = resolveScreenType(work, new Date(), !!localLeaveSeatDetectedAt);
+}
 
 const machine = new FeatureStateMachine();
 /** whenReady()에서 baseDir 설정 후 초기화됨 (설치 앱은 userData 사용) */
@@ -481,6 +488,7 @@ async function isLockRequired(): Promise<boolean> {
   try {
     const data = await api.getPcOffWorkTime();
     lastWorkTimeData = data as unknown as Record<string, unknown>;
+    applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     leaveSeatDetector.updatePolicy({
       leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
@@ -508,6 +516,10 @@ async function isLockRequired(): Promise<boolean> {
 async function checkLockAndShowLockWindow(reuseWindow?: BrowserWindow | null): Promise<boolean> {
   const locked = await isLockRequired();
   if (!locked) return false;
+  const screenType = (lastWorkTimeData.screenType ?? "off") as string;
+  if (screenType === "before") void logger.write(LOG_CODES.SCREEN_TYPE_BEFORE, "INFO", {});
+  else if (screenType === "off") void logger.write(LOG_CODES.SCREEN_TYPE_OFF, "INFO", {});
+  else if (screenType === "empty") { /* 이석은 LEAVE_SEAT_* 로그로 기록됨 */ }
   if (reuseWindow && !reuseWindow.isDestroyed()) {
     showLockInWindow(reuseWindow);
     void logger.write(LOG_CODES.LOCK_TRIGGERED, "INFO", { reason: "usage_time_ended" });
@@ -869,8 +881,9 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
   try {
     const data = await api.getPcOffWorkTime();
     
-    // 캐시 업데이트
+    // 캐시 업데이트 (FR-13: exCountRenewal 기준 시업/종업 화면 타입 반영)
     lastWorkTimeData = data as Record<string, unknown>;
+    applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     leaveSeatDetector.updatePolicy({
       leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
@@ -902,10 +915,8 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     }
 
     const merged = { ...data } as Record<string, unknown>;
-    if (localLeaveSeatDetectedAt) {
-      merged.screenType = "empty";
-      merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
-    }
+    if (localLeaveSeatDetectedAt) merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+    merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
     return { source: "api", data: merged };
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "getPcOffWorkTime", error: String(error) });
@@ -928,6 +939,7 @@ ipcMain.handle("pcoff:requestPcExtend", async (_event, payload: { pcOffYmdTime?:
     setOperationMode("TEMP_EXTEND");
     const workTime = await api.getPcOffWorkTime();
     lastWorkTimeData = workTime as unknown as Record<string, unknown>;
+    applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     createTrayInfoWindow();
     return { source: "api", success: true, data: workTime };
@@ -1058,8 +1070,9 @@ ipcMain.handle("pcoff:getTrayOperationInfo", async () => {
 ipcMain.handle("pcoff:refreshMyAttendance", async () => {
   const api = await getApiClient();
   if (!api) {
-    const mockData = buildMockWorkTime();
-    lastWorkTimeData = mockData as unknown as Record<string, unknown>;
+    const mockData = buildMockWorkTime() as Record<string, unknown>;
+    lastWorkTimeData = mockData;
+    applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     return mockData;
   }
@@ -1067,6 +1080,7 @@ ipcMain.handle("pcoff:refreshMyAttendance", async () => {
   try {
     const data = await api.getPcOffWorkTime();
     lastWorkTimeData = data as unknown as Record<string, unknown>;
+    applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     await logger.write(LOG_CODES.TRAY_ATTENDANCE_REFRESHED, "INFO", {});
     return data;

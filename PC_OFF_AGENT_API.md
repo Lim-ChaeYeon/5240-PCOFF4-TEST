@@ -120,6 +120,8 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 | `pcoffEmergencyYesNo (YES/NO)` | 긴급사용 중 여부 |
 | `emergencyStaDate (YYYYMMDDHH24MI)` | 긴급사용 시작 시간 |
 | `emergencyEndDate (YYYYMMDDHH24MI)` | 긴급사용 종료 시간 |
+| `screenType` | 잠금화면 유형: `before`(시업 전), `off`(종업), `empty`(이석). 클라이언트에서 `exCountRenewal`로 재계산 가능 |
+| `exCountRenewal (YYYYMMDDHH24MI)` | 일자변경 시각(옵션 1227). 현재 시각 < exCountRenewal → 종업화면(off), ≥ exCountRenewal → 시업화면(before) |
 
 ---
 

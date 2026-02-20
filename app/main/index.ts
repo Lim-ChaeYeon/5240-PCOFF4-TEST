@@ -555,7 +555,7 @@ app.whenReady().then(async () => {
     }
   }
   logger = new TelemetryLogger(baseDir, machine.getSessionId(), process.platform);
-  updater = new UpdateManager(baseDir, logger);
+  updater = new UpdateManager(baseDir, logger, app.getVersion());
   observer = new OpsObserver(logger, () => getApiBaseUrl(baseDir));
   authPolicy = new AuthPolicy(logger);
   guard = new AgentGuard(baseDir, logger);
@@ -688,6 +688,18 @@ app.whenReady().then(async () => {
     // 로그인 필요: 로그인 창 표시
     createLoginWindow();
   }
+
+  // 앱 시작 시 자동 업데이트 검사 (백그라운드, UI 준비 후)
+  const STARTUP_UPDATE_CHECK_DELAY_MS = 5000;
+  setTimeout(() => {
+    void updater.checkAndApplySilently().then((status) => {
+      if (status.state === "available" || status.state === "downloading") {
+        console.info("[PCOFF] 업데이트 검사: 새 버전 발견", status.version);
+      } else if (status.state === "not-available") {
+        console.info("[PCOFF] 업데이트 검사: 최신 버전");
+      }
+    });
+  }, STARTUP_UPDATE_CHECK_DELAY_MS);
 });
 
 app.on("window-all-closed", () => {

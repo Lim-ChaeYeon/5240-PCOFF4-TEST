@@ -1,4 +1,6 @@
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { LOG_CODES, PATHS } from "./constants.js";
 import { readJson, writeJson } from "./storage.js";
 import { TelemetryLogger } from "./telemetry-log.js";
@@ -27,6 +29,12 @@ export interface UpdateStatus {
 const MAX_RETRY_COUNT = 3;
 const RETRY_DELAY_MS = 60_000; // 1분 후 재시도
 
+// 개발 모드에서 프로젝트 루트 package.json 경로 (dist/app/core → 프로젝트 루트)
+const getProjectRootPackagePath = (): string => {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  return join(__dirname, "..", "..", "..", "package.json");
+};
+
 // Electron 런타임 여부 확인
 function isElectronRuntime(): boolean {
   return (
@@ -40,11 +48,14 @@ export class UpdateManager {
   private status: UpdateStatus = { state: "idle" };
   private autoUpdater: import("electron-updater").AppUpdater | null = null;
   private retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private readonly appVersion: string;
 
   constructor(
     private readonly baseDir: string,
-    private readonly logger: TelemetryLogger
+    private readonly logger: TelemetryLogger,
+    appVersion?: string
   ) {
+    this.appVersion = appVersion ?? this.resolveVersion();
     // Electron 환경에서만 autoUpdater 초기화
     if (isElectronRuntime()) {
       this.initAutoUpdater();
@@ -271,15 +282,19 @@ export class UpdateManager {
   }
 
   getAppVersion(): string {
-    if (isElectronRuntime()) {
+    return this.appVersion;
+  }
+
+  private resolveVersion(): string {
+    for (const pkgPath of [join(this.baseDir, "package.json"), getProjectRootPackagePath()]) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { app } = require("electron");
-        return app.getVersion();
+        const raw = readFileSync(pkgPath, "utf-8");
+        const pkg = JSON.parse(raw) as { version?: string };
+        if (pkg.version) return pkg.version;
       } catch {
-        // Electron 모듈 로드 실패
+        continue;
       }
     }
-    return "0.1.0"; // 폴백
+    return "0.1.0";
   }
 }

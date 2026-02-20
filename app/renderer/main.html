@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>5240 PcOff Agent - 작동정보</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        margin-top: 20px;
+      }
+      .info-card {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px;
+      }
+      .info-card-title {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .info-card-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .info-card-value.highlight {
+        color: var(--accent);
+      }
+      .info-card-sub {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .mode-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .mode-badge.normal { background: rgba(93, 160, 255, 0.2); color: #5da0ff; }
+      .mode-badge.temp-extend { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+      .mode-badge.emergency-use { background: rgba(239, 95, 103, 0.2); color: #ef5f67; }
+      .mode-badge.emergency-release { background: rgba(156, 39, 176, 0.2); color: #ce93d8; }
+      .mode-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      .refresh-btn {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .refresh-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text);
+      }
+      .refresh-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .section-header-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .section-title {
+        font-size: 14px;
+        color: var(--text);
+        font-weight: 600;
+      }
+      .version-summary {
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .divider {
+        height: 1px;
+        background: var(--line);
+        margin: 24px 0;
+      }
+      .status-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+      }
+      .status-row:last-child {
+        border-bottom: none;
+      }
+      .status-label {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .status-value {
+        font-size: 13px;
+        color: var(--text);
+        font-weight: 500;
+      }
+      .error-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--danger);
+        font-size: 12px;
+      }
+      .error-badge::before {
+        content: "!";
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--danger);
+        color: white;
+        display: grid;
+        place-items: center;
+        font-size: 10px;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="screen">
+      <section class="fixed">
+        <header class="top-box">
+          <div class="logo-item">
+            <span class="logo-mark">5240</span>
+            <div class="logo-text-wrap">
+              <strong>PCOFF AGENT</strong>
+              <span>작동정보</span>
+            </div>
+          </div>
+          <div class="top-actions">
+            <span id="user-display" class="user-display"></span>
+            <span id="app-version" class="version-badge"></span>
+            <span id="current-mode" class="mode-badge normal">
+              <span class="mode-indicator"></span>
+              <span id="mode-text">일반</span>
+            </span>
+          </div>
+        </header>
+
+        <section class="dashboard" style="max-width: 600px; width: 100%;">
+          <h1 class="title" style="font-size: 28px;">PCOFF 작동정보</h1>
+          
+          <!-- 현재 반영 근태정보 -->
+          <div class="section-header">
+            <span class="section-title">현재 반영 근태정보</span>
+            <span id="reflected-time" class="status-value" style="font-size: 12px;"></span>
+          </div>
+          <div class="info-card">
+            <div class="status-row">
+              <span class="status-label">적용 정책</span>
+              <span id="applied-policy" class="status-value">-</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">PC 사용 가능</span>
+              <span id="pc-on-status" class="status-value">-</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">시업 시간</span>
+              <span id="work-start" class="status-value">-</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">종업 시간</span>
+              <span id="work-end" class="status-value">-</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- 나의 근태정보 -->
+          <div class="section-header">
+            <span class="section-title">나의 근태정보</span>
+            <button id="refresh-attendance" class="refresh-btn">새로고침</button>
+          </div>
+          <div id="attendance-error" class="error-badge hidden">조회 실패</div>
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="info-card-title">임시연장</div>
+              <div class="info-card-value">
+                <span id="extend-count">0</span> / <span id="extend-max">3</span>회
+              </div>
+              <div class="info-card-sub">1회 <span id="extend-time">30</span>분</div>
+            </div>
+            <div class="info-card">
+              <div class="info-card-title">긴급사용</div>
+              <div id="emergency-status" class="info-card-value">허용</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- 버전정보: 기본은 한 줄, 상세보기·업데이트 확인 -->
+          <div class="section-header">
+            <span class="section-title">버전정보</span>
+            <div class="section-header-right">
+              <span id="version-summary" class="version-summary">-</span>
+              <button type="button" id="check-update" class="refresh-btn">업데이트 확인</button>
+              <button type="button" id="version-toggle" class="refresh-btn" aria-expanded="false">상세보기</button>
+            </div>
+          </div>
+          <div id="version-detail" class="info-card hidden">
+            <div class="status-row">
+              <span class="status-label">App Version</span>
+              <span id="version-app" class="status-value">-</span>
+            </div>
+            <div class="status-row">
+              <span class="status-label">조회 시각</span>
+              <span id="version-updated" class="status-value">-</span>
+            </div>
+            <div class="status-row">
+              <button type="button" id="open-logs-folder" class="refresh-btn">로그 폴더 열기</button>
+            </div>
+          </div>
+        </section>
+
+        <footer class="bottom-box" style="justify-content: center;">
+          <div class="time-box">
+            <span id="date-text"></span>
+            <strong id="time-text">--:--:--</strong>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script type="module" src="./main-info.js"></script>
+  </body>
+</html>

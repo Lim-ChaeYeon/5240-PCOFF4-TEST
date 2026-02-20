@@ -1,6 +1,6 @@
 {
   "name": "pcoff-electron-agent",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "5240 PcOff Agent Electron scaffold",
   "repository": {
@@ -49,6 +49,10 @@
       {
         "from": "config.json",
         "to": "config.json"
+      },
+      {
+        "from": "assets/tray-icon.png",
+        "to": "assets/tray-icon.png"
       }
     ],
     "win": {

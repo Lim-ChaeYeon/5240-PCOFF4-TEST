@@ -41,7 +41,7 @@ export async function getApiBaseUrl(baseDir: string): Promise<string | null> {
   return process.env.PCOFF_API_BASE_URL ?? fromConfig.apiBaseUrl ?? null;
 }
 
-/** state.json 우선, 없으면 config.json / env */
+/** 로그인 정보는 state.json에서만, API URL은 config.json에서 */
 export async function loadRuntimeConfig(baseDir: string): Promise<RuntimeConfig | null> {
   const statePath = join(baseDir, PATHS.state);
   const configPath = join(baseDir, PATHS.config);
@@ -49,8 +49,8 @@ export async function loadRuntimeConfig(baseDir: string): Promise<RuntimeConfig 
   const fromConfig = await readJson<Partial<RuntimeConfig>>(configPath, {});
 
   const apiBaseUrl = process.env.PCOFF_API_BASE_URL ?? fromConfig.apiBaseUrl;
-  const userServareaId = process.env.PCOFF_USER_SERVAREA_ID ?? state.userServareaId ?? fromConfig.userServareaId;
-  const userStaffId = process.env.PCOFF_USER_STAFF_ID ?? state.userStaffId ?? fromConfig.userStaffId;
+  const userServareaId = process.env.PCOFF_USER_SERVAREA_ID ?? state.userServareaId;
+  const userStaffId = process.env.PCOFF_USER_STAFF_ID ?? state.userStaffId;
 
   if (!apiBaseUrl || !userServareaId || !userStaffId) return null;
   return { apiBaseUrl, userServareaId, userStaffId };

@@ -92,11 +92,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
@@ -120,9 +115,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
           # 릴리스 없으면 생성 (이미 있으면 무시)
-          gh release create "$TAG" --title "Release $TAG" --notes "" --generate-notes=false 2>/dev/null || true
-          # 업로드: 최대 5회 재시도 (Finalizing 오류 회피)
+          gh release create "$TAG" --title "Release $TAG" --notes "" --generate-notes=false -R "$REPO" 2>/dev/null || true
+          # 업로드: 최대 5회 재시도
           set +e
           for i in 1 2 3 4 5; do
             FILES=()
@@ -130,7 +126,7 @@ jobs:
               [ -e "$g" ] && FILES+=("$g")
             done
             [ ${#FILES[@]} -eq 0 ] && { echo "No files to upload"; exit 1; }
-            if gh release upload "$TAG" "${FILES[@]}" --clobber; then
+            if gh release upload "$TAG" "${FILES[@]}" --clobber -R "$REPO"; then
               echo "Upload succeeded."
               exit 0
             fi

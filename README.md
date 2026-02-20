@@ -242,6 +242,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - [docs/다음_개발_진행_사항.md](docs/다음_개발_진행_사항.md) — 완료 항목·다음 작업 정리
 - [docs/개발_이력_리포트.md](docs/개발_이력_리포트.md) — 개발 이력·이슈 해결 기록
 - [docs/깃_푸시_용량초과_해결.md](docs/깃_푸시_용량초과_해결.md) — release/ 푸시 거부 시 히스토리 정리 방법
+- [docs/윈도우_설치_테스트_가이드.md](docs/윈도우_설치_테스트_가이드.md) — Windows 설치 파일 빌드·설치·실행 테스트 방법
 - [docs/맥_설치_가이드.md](docs/맥_설치_가이드.md) — Mac 설치 파일 "열 수 없음" / Gatekeeper 경고 시 실행 방법
 - [docs/업데이트_가이드_사용자.md](docs/업데이트_가이드_사용자.md) — 이미 설치한 사용자용 업데이트 확인·적용 방법
 - [docs/operations/logcode.md](docs/operations/logcode.md) — 로그 코드 매핑

@@ -192,6 +192,46 @@ export class PcOffApiClient {
   }
 }
 
+/** FR-12: 이석정보 서버 전송 */
+export interface LeaveSeatReportRequest {
+  eventType: "LEAVE_SEAT_START" | "LEAVE_SEAT_END";
+  workSessionType: "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE";
+  leaveSeatSessionId: string;
+  workSessionId?: string;
+  reason?: string;
+  reasonRequired?: boolean;
+  occurredAt: string;
+  clientVersion: string;
+  workYmd: string;
+  userServareaId: string;
+  userStaffId: string;
+  deviceId: string;
+}
+
+export interface LeaveSeatReportResponse {
+  code?: string;
+  message?: string;
+  accepted?: boolean;
+  eventId?: string;
+  serverReceivedAt?: string;
+}
+
+export async function reportLeaveSeatEvent(
+  baseUrl: string,
+  payload: LeaveSeatReportRequest
+): Promise<LeaveSeatReportResponse> {
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/reportLeaveSeatEvent.do`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([payload]),
+    signal: AbortSignal.timeout(10_000)
+  });
+  if (!res.ok) throw new Error(`reportLeaveSeatEvent failed: ${res.status}`);
+  const json = await res.json();
+  if (Array.isArray(json)) return (json[0] ?? {}) as LeaveSeatReportResponse;
+  return json as LeaveSeatReportResponse;
+}
+
 /** FR-08: 에이전트 이벤트 로그 전송 (Ops Observer) */
 export interface AgentEventPayload {
   events: Array<{

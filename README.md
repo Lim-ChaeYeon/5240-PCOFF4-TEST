@@ -192,7 +192,8 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **설치자 레지스트리 (FR-09)**: `app/core/installer-registry.ts`. deviceId(UUID)·설치 시각·OS·앱 버전 수집, `installer-registry.json` 로컬 저장, 앱 시작 시 서버 동기화(`/registerInstallerInfo.do`). ✅
 - **이석 감지·해제 플로우 (FR-11)**: `app/core/leave-seat.ts`. `screenType=empty` 감지 → `leaveSeatReasonYn/ManYn=YES`이면 사유 입력 모달 → `callCmmPcOnOffLogPrc(IN, reason)`. 휴게시간(`breakStartTime~breakEndTime`) 중이면 사유 면제. 시뮬레이터 Flow-02/02b PASS. ✅
 - **로컬 이석/절전 감지 (FR-11)**: `app/core/leave-seat-detector.ts`. 유휴(Idle): `powerMonitor.getSystemIdleTime()` 5초 폴링, API 정책(`leaveSeatUseYn`, `leaveSeatTime` 분) 초과 시 잠금화면. 절전: suspend 시각 기록, resume 시 경과 >= leaveSeatTime 이면 이석 잠금(감지시각=절전 시작). `getWorkTime` 응답에 로컬 이석 병합. **API 정규화**: 서버가 `leaveSeatUseYn`을 `"YES"`/`"NO"`로 내려줘도 `normalizeLeaveSeatUseYn()`으로 `"Y"`/`"N"` 변환 후 정책 적용. ✅
-- **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callCmmPcOnOffLogPrc
+- **이석정보 서버 전송 (FR-12)**: `app/core/leave-seat-reporter.ts`. 세션 기반(`leaveSeatSessionId`) START/END 전송(`POST /reportLeaveSeatEvent.do`). 이석 감지 시 START, PC-ON 해제 시 END. 재시도 큐(`leave-seat-queue.jsonl`) + 지수 백오프, 30초 주기 플러시. ✅
+- **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callCmmPcOnOffLogPrc, reportLeaveSeatEvent
 - **시뮬레이터·CI**: Flow-01~08 시나리오, parity-report.json, parity-summary.md, CI 아티팩트
 - **로깅**: JSONL, TelemetryLogger. LOG_CODES 상수로 APP_START, LOGIN_SUCCESS/FAIL, LOGOUT, LOCK/UNLOCK_TRIGGERED, UPDATE_*, AGENT_*, INSTALLER_REGISTRY_SYNC/FAIL, TRAY_*, LEAVE_SEAT_* 등 기록 (logcode.md·constants.ts 참고) ✅
 - **자동 업데이트 (FR-03)**: `electron-updater` 기반 무확인 자동 업데이트, 재시도 큐, 진행률 UI 표시 ✅
@@ -222,7 +223,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 | 7 | 다중 디스플레이 | 잠금 강화 alwaysOnTop·포커스, QA 시나리오 |
 | 8 | Windows Defender/SmartScreen 대응 | 코드 서명, 평판 관리, 업데이트 무결성 |
 | ~~9~~ | ~~이석/절전 감지 구현~~ | Idle·절전 기반 이석 화면, leaveDetectedAt 표시 **완료** ✅ |
-| 10 | 이석정보 서버 전송 | LEAVE_SEAT_START/END 세션 매핑, 재시도 큐 (FR-12, Flow-10) |
+| ~~10~~ | ~~이석정보 서버 전송~~ | LEAVE_SEAT_START/END 세션 매핑, 재시도 큐 (FR-12, Flow-10) **완료** ✅ |
 | ~~11~~ | ~~시업/종업 화면 로직~~ | exCountRenewal 기준 시업/종업 구분, resolveScreenType·캐시 반영 **완료** ✅ |
 | 12 | 고객사 설정 반영 | 문구·이미지·로고·긴급해제·이석해제 비밀번호 (FR-14) |
 | 13 | 긴급해제 (비밀번호) | 비밀번호 검증, 시도제한, 3시간 만료 (FR-15, Flow-12) |

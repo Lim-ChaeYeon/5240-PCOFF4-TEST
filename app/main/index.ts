@@ -28,6 +28,7 @@ import {
   loadOrCreateInstallerRegistry,
   syncInstallerRegistry
 } from "../core/installer-registry.js";
+import { LeaveSeatReporter } from "../core/leave-seat-reporter.js";
 
 /** 개발 시: 프로젝트 디렉터리, 설치 앱: userData(설치 앱 전용 상태·로그 분리) */
 let baseDir = process.cwd();
@@ -45,6 +46,11 @@ type OperationMode = "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE" | "EMERGENCY_REL
 let currentMode: OperationMode = "NORMAL";
 let lastWorkTimeData: Record<string, unknown> = {};
 let lastWorkTimeFetchedAt: string | null = null;
+
+/** FR-12: LeaveSeatReporter 컨텍스트용 캐시 (loadRuntimeConfig에서 갱신) */
+let cachedApiBaseUrl: string | null = null;
+let cachedUserServareaId = "";
+let cachedUserStaffId = "";
 
 /** 로컬 이석 감지(유휴/절전)로 잠금된 경우: 감지 시각·사유. PC-ON 해제 시 클리어 */
 let localLeaveSeatDetectedAt: Date | null = null;
@@ -64,6 +70,7 @@ let updater: UpdateManager;
 let observer: OpsObserver;
 let authPolicy: AuthPolicy;
 let guard: AgentGuard;
+let leaveSeatReporter: LeaveSeatReporter;
 
 function getTodayYmd(): string {
   const now = new Date();
@@ -335,9 +342,13 @@ function showLockForLocalLeaveSeat(detectedAt: Date, reason: LeaveSeatDetectedRe
 /** 전역 핫키용 로그아웃: 로그인 정보 삭제 후 로그인 창 전환 */
 async function doGlobalLogout(): Promise<void> {
   stopLockCheckInterval();
+  leaveSeatReporter.stop();
   await clearLoginState(baseDir);
   lastWorkTimeData = {};
   lastWorkTimeFetchedAt = null;
+  cachedApiBaseUrl = null;
+  cachedUserServareaId = "";
+  cachedUserStaffId = "";
   await logger.write(LOG_CODES.LOGOUT, "INFO", { source: "globalShortcut" });
   createLoginWindow();
 }
@@ -589,6 +600,18 @@ app.whenReady().then(async () => {
   observer = new OpsObserver(logger, () => getApiBaseUrl(baseDir));
   authPolicy = new AuthPolicy(logger);
   guard = new AgentGuard(baseDir, logger);
+  leaveSeatReporter = new LeaveSeatReporter(
+    baseDir,
+    logger,
+    () => cachedApiBaseUrl,
+    () => ({
+      workYmd: getTodayYmd(),
+      userServareaId: cachedUserServareaId,
+      userStaffId: cachedUserStaffId,
+      deviceId: machine.getSessionId(),
+      clientVersion: app.getVersion()
+    })
+  );
 
   await logger.write(LOG_CODES.APP_START, "INFO", { platform: process.platform });
 
@@ -684,7 +707,12 @@ app.whenReady().then(async () => {
   }
 
   if (hasLogin) {
+    cachedApiBaseUrl = config?.apiBaseUrl ?? null;
+    cachedUserServareaId = config?.userServareaId ?? "";
+    cachedUserStaffId = config?.userStaffId ?? "";
+
     startLockCheckInterval();
+    leaveSeatReporter.start();
 
     leaveSeatDetector.start({
       isLeaveSeatActive: () => localLeaveSeatDetectedAt !== null,
@@ -694,6 +722,9 @@ app.whenReady().then(async () => {
           idleSeconds,
           leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
         });
+        const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
+          : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
+        void leaveSeatReporter.reportStart("INACTIVITY", wsType, detectedAt);
         showLockForLocalLeaveSeat(detectedAt, "INACTIVITY");
       },
       onSleepDetected: (detectedAt, sleepElapsedSeconds) => {
@@ -702,6 +733,9 @@ app.whenReady().then(async () => {
           sleepElapsedSeconds,
           leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
         });
+        const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
+          : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
+        void leaveSeatReporter.reportStart("SLEEP_EXCEEDED", wsType, detectedAt);
         showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED");
       },
       onSleepEntered: () => void logger.write(LOG_CODES.SLEEP_ENTERED, "INFO", {}),
@@ -753,6 +787,7 @@ app.on("before-quit", async () => {
   globalShortcut.unregisterAll();
   stopLockCheckInterval();
   leaveSeatDetector.stop();
+  leaveSeatReporter?.stop();
   observer?.stop();
   await guard?.stop();
 });
@@ -860,9 +895,13 @@ ipcMain.handle(
 );
 ipcMain.handle("pcoff:logout", async () => {
   stopLockCheckInterval();
+  leaveSeatReporter.stop();
   await clearLoginState(baseDir);
   lastWorkTimeData = {};
   lastWorkTimeFetchedAt = null;
+  cachedApiBaseUrl = null;
+  cachedUserServareaId = "";
+  cachedUserStaffId = "";
   await logger.write(LOG_CODES.LOGOUT, "INFO", {});
   return { success: true };
 });
@@ -997,6 +1036,7 @@ ipcMain.handle(
           await logger.write(LOG_CODES.LEAVE_SEAT_RELEASED, "INFO", {
             reason: localLeaveSeatReason ?? "unknown"
           });
+          await leaveSeatReporter.reportEnd(payload.reason);
           localLeaveSeatDetectedAt = null;
           localLeaveSeatReason = null;
         }
@@ -1101,9 +1141,18 @@ ipcMain.handle("pcoff:getOperationMode", async () => {
 
 // 로그인 성공 후: 사용시간 종료(pcOnYn=N)일 때만 잠금화면 표시 (호출한 창을 재사용해 새 창 안 띄움)
 ipcMain.handle("pcoff:checkLockAndShow", async (event) => {
+  // FR-12: 로그인 직후 reporter 컨텍스트 갱신 및 시작
+  const cfg = await loadRuntimeConfig(baseDir);
+  if (cfg) {
+    cachedApiBaseUrl = cfg.apiBaseUrl;
+    cachedUserServareaId = cfg.userServareaId;
+    cachedUserStaffId = cfg.userStaffId;
+  }
+  leaveSeatReporter.start();
+
   const reuseWin = BrowserWindow.fromWebContents(event.sender);
   const lockOpened = await checkLockAndShowLockWindow(reuseWin ?? undefined);
-  startLockCheckInterval(); // 로그인 직후부터 주기 검사 시작
+  startLockCheckInterval();
   return { lockOpened };
 });
 

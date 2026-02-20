@@ -9,7 +9,8 @@ export const PATHS = {
   watchList: "guard/watch-list.json",
   updateDir: "update",
   retryQueue: "update/retry-queue.json",
-  installerRegistry: "installer-registry.json"
+  installerRegistry: "installer-registry.json",
+  leaveSeatQueue: "leave-seat-queue.jsonl"
 } as const;
 
 export const LOG_CODES = {
@@ -58,6 +59,12 @@ export const LOG_CODES = {
   LEAVE_SEAT_RELEASED: "LEAVE_SEAT_RELEASED",
   SLEEP_ENTERED: "SLEEP_ENTERED",
   SLEEP_RESUMED: "SLEEP_RESUMED",
+
+  // 이석정보 서버 전송 (FR-12)
+  LEAVE_SEAT_START: "LEAVE_SEAT_START",
+  LEAVE_SEAT_END: "LEAVE_SEAT_END",
+  LEAVE_SEAT_REPORT_FAILED: "LEAVE_SEAT_REPORT_FAILED",
+  LEAVE_SEAT_REPORT_RETRY: "LEAVE_SEAT_REPORT_RETRY",
 
   // 트레이 작동정보 (FR-16)
   TRAY_INFO_OPENED: "TRAY_INFO_OPENED",

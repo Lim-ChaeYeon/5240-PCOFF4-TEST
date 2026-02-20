@@ -45,6 +45,7 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 | PC ON/OFF 로그 기록 (출근/퇴근 산정 포함) | `/callCmmPcOnOffLogPrc.do` | `tmckButnCd` IN/OUT 값에 따라 출근/퇴근 집계 |
 | 임시연장 요청 | `/callPcOffTempDelay.do` | 임시연장 가능 여부 확인 후 호출 |
 | 긴급사용 요청 | `/callPcOffEmergencyUse.do` | 인증번호/사유 입력 후 긴급사용 시작/종료 |
+| 이석정보 서버 전송 (FR-12) | `/reportLeaveSeatEvent.do` | 이석 START/END 세션 기반 전송, 재시도 큐 |
 
 ---
 
@@ -204,6 +205,33 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 **logCode 예:** `APP_START`, `HEARTBEAT`, `CRASH_DETECTED`, `OFFLINE_DETECTED`, `AGENT_TAMPER_DETECTED`, `UPDATE_FOUND` 등 (`docs/operations/logcode.md` 참고).
 
 **Response:** 서버는 2xx로 수신 확인 시 성공으로 간주한다. 실패 시 클라이언트는 지수 백오프 후 재시도한다.
+
+---
+
+### 2.8 이석정보 서버 전송 (FR-12)
+
+**Endpoint:** `POST /reportLeaveSeatEvent.do`
+
+**Scenario:** 에이전트가 이석 시작(START)/종료(END) 이벤트를 세션 기반(`leaveSeatSessionId`)으로 서버에 전송한다. Idle/절전 감지 시 START, PC-ON 해제 시 END. 장애 내성을 위해 실패 시 로컬 큐(JSONL) 적재 후 지수 백오프 재시도.
+
+**Request Body (JSON 배열, 1건)**
+
+| 필드 | 설명 |
+|------|------|
+| `eventType` | `LEAVE_SEAT_START` \| `LEAVE_SEAT_END` |
+| `workSessionType` | `NORMAL` \| `TEMP_EXTEND` \| `EMERGENCY_USE` |
+| `leaveSeatSessionId` | 동일 세션 내 START/END 매핑용 UUID |
+| `reason` | 이석 사유(200자 제한, 제어문자 제거). END 시 PC-ON 사유 가능 |
+| `occurredAt` | 이벤트 발생 시각(ISO8601) |
+| `clientVersion` | 앱 버전 |
+| `workYmd` | 업무일자(YYYYMMDD) |
+| `userServareaId` | 서비스 영역 코드 |
+| `userStaffId` | 사용자 OID |
+| `deviceId` | 기기 식별자 |
+
+**Response (요건 기반 예시):** `code`, `message`, `accepted`, `eventId`, `serverReceivedAt` 등. 2xx 수신 시 성공. 실패 시 클라이언트는 `leave-seat-queue.jsonl`에 적재 후 10s→30s→60s→5m→15m 지수 백오프, 최대 10회 재시도.
+
+**정합성:** START 없이 END 전송 금지. 중복 START 방지(활성 세션 있으면 무시).
 
 ---
 

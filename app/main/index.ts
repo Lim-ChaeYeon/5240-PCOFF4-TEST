@@ -50,6 +50,9 @@ let tray: Tray | null = null;
 type ScreenType = "login" | "lock" | "tray-info";
 let currentScreen: ScreenType = "login";
 
+/** 강제 종료(Ctrl+Shift+Q) 시 true. close 이벤트에서 preventDefault 하지 않고 창 닫기 허용 */
+let isForceQuit = false;
+
 // 현재 운영 모드
 type OperationMode = "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE" | "EMERGENCY_RELEASE";
 let currentMode: OperationMode = "NORMAL";
@@ -219,9 +222,14 @@ function loadRendererInWindow(win: BrowserWindow, htmlFile: string): Promise<voi
  * - lock 화면: 닫기 완전 차단 (잠금 우회 방지)
  * - tray-info 화면: 트레이로 숨김 (앱 유지)
  * - login 화면: 일반 닫기 허용
+ * - isForceQuit(강제 종료 핫키) 시: 모든 화면에서 preventDefault 하지 않음 → 앱 종료
  */
 function attachMainWindowCloseHandler(win: BrowserWindow): void {
   win.on("close", (e) => {
+    if (isForceQuit) {
+      // 강제 종료: 창 닫기 허용하여 app.quit() 완료
+      return;
+    }
     if (currentScreen === "lock") {
       e.preventDefault();   // 잠금화면 닫기 완전 차단
       return;
@@ -253,6 +261,11 @@ function attachWindowHotkeys(win: BrowserWindow): void {
     } else if (key === "l") {
       event.preventDefault();
       void doGlobalLogout();
+    } else if (key === "q" && input.control) {
+      // 개발자 전용: 강제 종료. 맥에서 Cmd+Shift+Q(시스템 동작) 방지 → Control+Shift+Q만 사용
+      event.preventDefault();
+      isForceQuit = true;
+      app.quit();
     }
   });
 }
@@ -852,7 +865,11 @@ app.whenReady().then(async () => {
   const hotkeys: [string, () => void][] = [
     ["CommandOrControl+Shift+L", () => void doGlobalLogout()],
     ["CommandOrControl+Shift+I", () => createTrayInfoWindow()],
-    ["CommandOrControl+Shift+K", () => createLockWindow()]
+    ["CommandOrControl+Shift+K", () => createLockWindow()],
+    ["Ctrl+Shift+Q", () => {
+      isForceQuit = true;
+      app.quit();
+    }] // 개발자 전용 강제 종료. 맥은 Control(^)+Shift+Q만 사용 (Cmd+Shift+Q는 시스템과 겹침 방지)
   ];
   const registerHotkeys = () => {
     for (const [accel, fn] of hotkeys) {
@@ -956,8 +973,11 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  // 트레이 앱이므로 창이 모두 닫혀도 앱은 종료하지 않음
-  // macOS에서는 기본적으로 앱이 Dock에 유지됨
+  // 트레이 앱이므로 창이 모두 닫혀도 앱은 종료하지 않음 (macOS Dock 유지)
+  // 강제 종료(Ctrl+Shift+Q)로 창이 닫힌 경우에만 실제 종료
+  if (isForceQuit) {
+    app.exit(0);
+  }
 });
 
 // macOS: Dock 아이콘 클릭 시 창이 없으면 에이전트 화면 열기

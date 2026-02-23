@@ -150,8 +150,9 @@ npm run simulator:all      # Flow-01~08 전체 시나리오 실행
 | 로그아웃 | Ctrl + Shift + L | Cmd + Shift + L |
 | PCOFF 작동정보 창 | Ctrl + Shift + I | Cmd + Shift + I |
 | 잠금화면 창 | Ctrl + Shift + K | Cmd + Shift + K |
+| 강제 종료 (개발자 전용) | Ctrl + Shift + Q | Control + Shift + Q (⌃ 키) |
 
-앱이 실행 중이면 **어디서든** 위 조합으로 동작합니다. (상세: [docs/로그인_테스트.md §7](docs/로그인_테스트.md), [docs/테스트_가이드_비개발자.md §4.6](docs/테스트_가이드_비개발자.md))
+앱이 실행 중이면 **어디서든** 위 조합으로 동작합니다. 강제 종료는 트레이 메뉴·UI에 노출되지 않는 개발자 전용 단축키입니다. (상세: [docs/로그인_테스트.md §7](docs/로그인_테스트.md), [docs/테스트_가이드_비개발자.md §4.6](docs/테스트_가이드_비개발자.md))
 
 ---
 

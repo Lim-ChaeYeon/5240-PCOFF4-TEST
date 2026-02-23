@@ -325,3 +325,68 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 
 * 출근/퇴근 산정은 `/callCmmPcOnOffLogPrc.do`의 IN/OUT 로그 규칙을 준수한다.
 * 어떤 동작이 IN/OUT에 해당하는지 매핑은 `docs/operations/logcode.md`와 동기화해야 한다.
+
+---
+
+## 부록 A. 기존 대비 v1.9에서 추가·변경된 항목
+
+엑셀 5240_COMMON_PC_OFF_API v1.9 반영 시, **기존 문서에 없던 값** 또는 **이름·의미가 바뀐 값**만 정리한다.
+
+### 공통
+
+| 구분 | 항목 | 내용 |
+|------|------|------|
+| **추가** | 규격 기준 | 문서 상단에 "5240_COMMON_PC_OFF_API v1.9 (엑셀)" 명시 |
+| **추가** | Base URL | `https://api.tigris5240.com` |
+| **추가** | §0.4 공통 응답 코드 | code: 1, -1, -4, -5, -9, 500 및 설명. msg UTF-8 디코딩 안내 |
+
+### 2.1 서비스 영역
+
+| 구분 | 항목 | 내용 |
+|------|------|------|
+| **추가** | Response `userMobileNo` | 호출 시 전달한 전화번호 그대로 반환 |
+
+### 2.2 로그인
+
+| 구분 | 항목 | 내용 |
+|------|------|------|
+| **변경** | Request 파라미터 | 기존: userServareaId, userStaffId, workYmd 등으로 적혀 있음 → **v1.9**: `loginServareaId`, `loginUserId`, `loginPassword` (요청 시 전달하는 값) |
+| **추가** | Response `loginUserNm` | 로그인 유저 성명 |
+| **추가** | Response `message5` | 기존 message1~4 → **message1~5** |
+
+### 2.3 시간조회 (getPcOffWorkTime)
+
+| 구분 | 항목 | 내용 |
+|------|------|------|
+| **추가** | Request 표 | `userServareaId`, `userStaffId`, `workYmd` 명시 |
+| **추가** | Response 필드 (엑셀 전체) | `staYmdTime`, `endYmdTime`, `checkTime`, `workTypeCd`, `workTypeNm`, `freeTimeWorkTypeYn`, `workYmd`, `pcOffTargetYn`, `pcMealStaTime`, `pcMealEndTime`, `pcOnMsg`, `workZoneQtyType`, `nextYmd`, `leaveSeatReasonTime`, `weekCreWorkTime`, `weekWorkTime`, `weekLmtOtTime`, `weekUseOtTime`, `weekApplOtTime`, `apiCallLogYesNo`, `pcoffLoginYn` 등 (기존에는 일부만 있었음) |
+
+### 2.4 로그기록 (callCmmPcOnOffLogPrc)
+
+| 구분 | 항목 | 내용 |
+|------|------|------|
+| **추가** | Request `userServareaId`, `userStaffId`, `workYmd` | 공통 파라미터 명시 |
+| **추가** | Request `recoder` | 고정값 `"PC-OFF"` |
+| **추가** | Request `reason` | 사유(필수인 경우 입력) |
+| **추가** | Request `emergencyYn` | 긴급사용여부/이석시간/이석시작/이석종료/이석중비근무시간 형식 |
+| **추가** | leaveSeatOffInputMath (0/1/2/3) 규칙 표 | 비근무시간 전달 규칙 |
+| **추가** | NOTE | 2·3의 경우 서버로 이석 시작·종료 시간 전달, 서버에서 재계산 |
+
+### 2.5 임시연장
+
+| 구분 | 항목 | 내용 |
+|------|------|------|
+| **추가** | Request `userServareaId`, `userStaffId`, `workYmd` | 공통 파라미터 명시 |
+| **추가** | Request `extCount` | 임시연장 차수(1, 2, …) |
+
+### 2.6 긴급사용
+
+| 구분 | 항목 | 내용 |
+|------|------|------|
+| **추가** | Request `userServareaId`, `userStaffId`, `workYmd` | 공통 파라미터 명시 |
+| **추가** | Request `clickIp` | (선택) IP/GPS/OS를 "/"로 연결. 예: 127.0.0.1/WINDOW |
+
+### 요약
+
+- **추가된 것**: Base URL, 공통 응답 코드(§0.4), 각 API별 전체 URL, 서비스영역 응답 `userMobileNo`, 로그인 요청 정확한 필드명(loginServareaId 등) 및 응답 `loginUserNm`·`message5`, 시간조회 Request 표·Response 필드 전체, 로그기록 Request(recoder·reason·emergencyYn)·이석 비근무 규칙·NOTE, 임시연장·긴급사용 Request(extCount·clickIp 등).
+- **이름/의미 변경**: 로그인 **요청**은 `userServareaId`/`userStaffId`가 아니라 `loginServareaId`/`loginUserId`/`loginPassword`로 전달한다는 점을 명확히 함.

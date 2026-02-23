@@ -877,7 +877,10 @@ app.on("activate", () => {
   }
 });
 
-app.on("before-quit", async () => {
+app.on("before-quit", async (e) => {
+  // 다운로드된 업데이트가 있으면 종료 시 설치 실행 (autoInstallOnAppQuit만으로는 미동작할 수 있음)
+  if (updater.quitAndInstallIfDownloaded()) return;
+
   globalShortcut.unregisterAll();
   stopLockCheckInterval();
   leaveSeatDetector.stop();

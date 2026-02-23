@@ -49,6 +49,8 @@ export class UpdateManager {
   private autoUpdater: import("electron-updater").AppUpdater | null = null;
   private retryTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly appVersion: string;
+  /** Electron 환경에서 initAutoUpdater 완료 대기용 — 버튼 클릭 시 autoUpdater가 준비될 때까지 기다림 */
+  private readonly initPromise: Promise<void>;
 
   constructor(
     private readonly baseDir: string,
@@ -56,10 +58,7 @@ export class UpdateManager {
     appVersion?: string
   ) {
     this.appVersion = appVersion ?? this.resolveVersion();
-    // Electron 환경에서만 autoUpdater 초기화
-    if (isElectronRuntime()) {
-      this.initAutoUpdater();
-    }
+    this.initPromise = isElectronRuntime() ? this.initAutoUpdater() : Promise.resolve();
   }
 
   private async initAutoUpdater(): Promise<void> {
@@ -158,13 +157,17 @@ export class UpdateManager {
   /**
    * 업데이트 확인 및 자동 적용
    *
-   * Electron 환경: electron-updater로 실제 업데이트 수행
+   * Electron 환경: init 완료 대기 후 electron-updater로 실제 업데이트 수행
    * 비-Electron 환경: 모의 동작 (시뮬레이터용)
    */
   async checkAndApplySilently(nextVersion = "0.1.1"): Promise<UpdateStatus> {
+    if (isElectronRuntime()) {
+      await this.initPromise;
+    }
     if (this.autoUpdater) {
       // 실제 electron-updater 사용
       this.status = { state: "checking" };
+      this.sendStatusToRenderer();
       try {
         await this.autoUpdater.checkForUpdates();
         return this.status;
@@ -172,6 +175,7 @@ export class UpdateManager {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         this.status = { state: "error", error: errorMessage };
+        this.sendStatusToRenderer();
         await this.enqueueRetry("latest", errorMessage);
         return this.status;
       }
@@ -283,6 +287,27 @@ export class UpdateManager {
 
   getAppVersion(): string {
     return this.appVersion;
+  }
+
+  /** 다운로드된 업데이트가 있으면 true (종료 시 설치 대기 중) */
+  hasDownloadedUpdate(): boolean {
+    return this.status.state === "downloaded" && this.autoUpdater != null;
+  }
+
+  /**
+   * 다운로드된 업데이트가 있을 때만 quitAndInstall() 호출.
+   * 앱 종료 시 자동 적용이 안 되는 환경(macOS 등)에서 before-quit에서 명시 호출용.
+   * @returns 설치를 실행했으면 true (앱이 곧 종료됨)
+   */
+  quitAndInstallIfDownloaded(): boolean {
+    if (this.status.state !== "downloaded" || !this.autoUpdater) return false;
+    try {
+      this.autoUpdater.quitAndInstall(false, true);
+      return true;
+    } catch (e) {
+      console.warn("[UpdateManager] quitAndInstall failed:", e);
+      return false;
+    }
   }
 
   private resolveVersion(): string {

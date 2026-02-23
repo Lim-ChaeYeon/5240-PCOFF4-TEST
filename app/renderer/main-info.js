@@ -301,9 +301,7 @@ async function init() {
     });
     if (window.pcoffApi.onUpdateProgress) {
       window.pcoffApi.onUpdateProgress((data) => {
-        if (checkUpdateEl && data.progress != null) {
-          checkUpdateEl.textContent = `다운로드 ${Math.round(data.progress)}%`;
-        }
+        if (checkUpdateEl && data) updateCheckButton(data);
       });
     }
   }

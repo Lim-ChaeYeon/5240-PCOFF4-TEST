@@ -17,17 +17,27 @@ const INITIAL_BACKOFF_MS = 5_000;
  * - 크래시/오프라인 감지 시 CRASH_DETECTED, OFFLINE_DETECTED 로그 기록 및 즉시 전송 시도
  * - 로그 배치 전송, 실패 시 지수 백오프 재시도
  */
+export interface OpsObserverCallbacks {
+  onHeartbeatFail?: () => void;
+  onHeartbeatSuccess?: () => void;
+}
+
 export class OpsObserver {
   private heartbeatTimer?: NodeJS.Timeout;
   private flushTimer?: NodeJS.Timeout;
   private queue: LogEntry[] = [];
   private backoffMs = INITIAL_BACKOFF_MS;
   private flushScheduled: ReturnType<typeof setTimeout> | null = null;
+  private callbacks: OpsObserverCallbacks = {};
 
   constructor(
     private readonly logger: TelemetryLogger,
     private readonly getApiBaseUrl: () => Promise<string | null>
   ) {}
+
+  setCallbacks(cb: OpsObserverCallbacks): void {
+    this.callbacks = cb;
+  }
 
   /**
    * Logger에 transport 등록 후 heartbeat·주기 flush 시작
@@ -114,12 +124,13 @@ export class OpsObserver {
     try {
       await reportAgentEvents(baseUrl, reportPayload);
       this.backoffMs = INITIAL_BACKOFF_MS;
+      this.callbacks.onHeartbeatSuccess?.();
       if (this.queue.length > 0) {
         this.scheduleNextFlush(0);
       }
     } catch (err) {
-      // 실패 시 배치를 큐 앞에 다시 넣음
       this.queue.unshift(...batch);
+      this.callbacks.onHeartbeatFail?.();
       const delay = this.backoffMs;
       this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
       this.scheduleNextFlush(delay);

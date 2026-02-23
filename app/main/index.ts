@@ -20,6 +20,7 @@ import { FeatureStateMachine } from "../core/state-machine.js";
 import { TelemetryLogger } from "../core/telemetry-log.js";
 import { UpdateManager } from "../core/update-manager.js";
 import { OpsObserver } from "../core/ops-observer.js";
+import { OfflineManager, type ConnectivityState } from "../core/offline-manager.js";
 import { AuthPolicy } from "../core/auth-policy.js";
 import { AgentGuard } from "../core/agent-guard.js";
 import { PcOffApiClient, PcOffAuthClient, type WorkTimeResponse } from "../core/api-client.js";
@@ -78,6 +79,7 @@ let observer: OpsObserver;
 let authPolicy: AuthPolicy;
 let guard: AgentGuard;
 let leaveSeatReporter: LeaveSeatReporter;
+let offlineManager: OfflineManager;
 
 function getTodayYmd(): string {
   const now = new Date();
@@ -582,8 +584,10 @@ async function isLockRequired(): Promise<boolean> {
       leaveSeatReasonManYn: data.leaveSeatReasonManYn,
       pcoffEmergencyYesNo: data.pcoffEmergencyYesNo
     });
+    void offlineManager.reportApiSuccess();
     return data.pcOnYn === "N";
   } catch {
+    void offlineManager.reportApiFailure("api");
     return false;
   }
 }
@@ -741,7 +745,35 @@ app.whenReady().then(async () => {
     }
   })();
 
+  // FR-17: Offline Manager 초기화 — heartbeat/API 실패 기반 오프라인 감지·유예·잠금
+  offlineManager = new OfflineManager(baseDir, logger);
+  offlineManager.setOnStateChange((state: ConnectivityState) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("pcoff:connectivity-changed", { state });
+    }
+    if (state === "OFFLINE_GRACE" || state === "OFFLINE_LOCKED") {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        showLockInWindow(mainWindow);
+        mainWindow.show();
+        mainWindow.focus();
+      } else {
+        createLockWindow();
+        mainWindow?.show();
+        mainWindow?.focus();
+      }
+    } else if (state === "ONLINE") {
+      if (currentScreen === "lock") {
+        void createTrayInfoWindow();
+      }
+    }
+  });
+  await offlineManager.restore();
+
   // FR-08: Ops Observer 시작 (heartbeat + 로그 서버 전송)
+  observer.setCallbacks({
+    onHeartbeatFail: () => void offlineManager.reportApiFailure("heartbeat"),
+    onHeartbeatSuccess: () => void offlineManager.reportApiSuccess()
+  });
   observer.start();
   // FR-07: Agent Guard 시작 (무결성 감시)
   await guard.start();
@@ -885,6 +917,7 @@ app.on("before-quit", async (e) => {
   stopLockCheckInterval();
   leaveSeatDetector.stop();
   leaveSeatReporter?.stop();
+  offlineManager?.stop();
   observer?.stop();
   await guard?.stop();
 });
@@ -1278,4 +1311,24 @@ ipcMain.handle("pcoff:closeCurrentWindow", async (event) => {
 // 로그 이벤트 기록
 ipcMain.handle("pcoff:logEvent", async (_event, payload: { code: string; payload: Record<string, unknown> }) => {
   await logger.write(payload.code, "INFO", payload.payload);
+});
+
+// FR-17: 오프라인 상태 조회·재시도 IPC
+ipcMain.handle("pcoff:getConnectivityState", async () => {
+  return offlineManager.getSnapshot();
+});
+
+ipcMain.handle("pcoff:retryConnectivity", async () => {
+  const recovered = await offlineManager.retryConnectivity(async () => {
+    const baseUrl = await getApiBaseUrl(baseDir);
+    if (!baseUrl) return false;
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/reportAgentEvents.do`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ events: [], deviceId: "probe", sessionId: "probe" }),
+      signal: AbortSignal.timeout(10_000)
+    });
+    return res.ok;
+  });
+  return { recovered, snapshot: offlineManager.getSnapshot() };
 });

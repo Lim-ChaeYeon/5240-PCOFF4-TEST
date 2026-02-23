@@ -200,6 +200,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **비밀번호 변경 확인 (FR-04)**: 서버 `pwdChgYn=Y` 감지 시 확인 전용 모달, 검증/재로그인 없음 ✅
 - **Agent Guard (FR-07)**: 무결성 체크(SHA-256), 파일 감시, 탐지 시 로그·복구 트리거, IPC 연동 ✅
 - **Ops Observer (FR-08)**: heartbeat·로그 배치 서버 전송(`/reportAgentEvents.do`), 크래시/오프라인 보고 ✅
+- **오프라인 복구·잠금 (FR-17)**: OfflineManager(30분 유예 → OFFLINE_LOCKED), heartbeat/API 연속 실패 감지, 잠금화면 오프라인 UI·다시 시도, offline-state.json 저장·복원 ✅
 - **에이전트 UI·잠금화면 분리**: 트레이 작동정보(`main.html`), 잠금화면(`lock.html`), 로그인(`index.html`) — 단일 창에서 전환, 시스템 트레이 메뉴, 운영 모드 관리 ✅
 - **트레이 아이콘**: `assets/tray-icon.png`(16×16, 5240 로고 스타일). extraResources로 복사·resourcesPath 우선 로드. 파일 없을 때 postbuild 생성·Base64 fallback. macOS setTemplateImage.
 - **CI·릴리스 (패키징)**: 태그 푸시(v*) 시 GitHub Actions로 Windows x64·Mac 빌드 후 GitHub Release 업로드. Release 자산은 `latest.yml`/`latest-mac.yml` 등 경로 없이 업로드되어 electron-updater가 인식. Windows → .exe, Mac → .dmg/.zip. ✅
@@ -221,7 +222,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 | 3 | 패키징·플랫폼 검증 | Windows/Mac CI 빌드·Release **완료** ✅. 코드 서명·notarization은 **마지막에 진행** (NFR-01, DoD) |
 | 4 | 인스톨/언인스톨 정책 | 설치자 식별, 무결성 기준선, 삭제 방지 (FR-19) |
 | 5 | 프로세스 Kill 통제 | 사용자 Kill 차단, OTP 승인 (FR-18) |
-| 6 | 오프라인 복구·잠금 | 30분 유예, 오프라인 잠금, 복구 시도 (FR-17, Flow-13) |
+| ~~6~~ | ~~오프라인 복구·잠금~~ | 30분 유예, 오프라인 잠금, 복구 시도 (FR-17, Flow-13) **완료** ✅ |
 | 7 | 다중 디스플레이 | 잠금 강화 alwaysOnTop·포커스, QA 시나리오 |
 | 8 | Windows Defender/SmartScreen 대응 | 코드 서명, 평판 관리, 업데이트 무결성 |
 | ~~9~~ | ~~이석/절전 감지 구현~~ | Idle·절전 기반 이석 화면, leaveDetectedAt 표시 **완료** ✅ |

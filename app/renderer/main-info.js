@@ -43,9 +43,13 @@ function showToast(text) {
   setTimeout(() => toastEl.classList.remove("show"), 1400);
 }
 
+/** 현재 업데이트 상태 (버튼 클릭 시 '지금 재시작' vs '업데이트 확인' 분기용) */
+let lastUpdateStatus = { state: "idle" };
+
 /** 업데이트 확인 결과에 따라 버튼 텍스트·토스트 표시 */
 function updateCheckButton(status) {
   if (!checkUpdateEl) return;
+  if (status) lastUpdateStatus = status;
   const s = status?.state ?? "idle";
   switch (s) {
     case "checking":
@@ -61,9 +65,9 @@ function updateCheckButton(status) {
       checkUpdateEl.disabled = true;
       break;
     case "downloaded":
-      checkUpdateEl.textContent = "재시작 대기";
-      checkUpdateEl.disabled = true;
-      showToast("업데이트 다운로드 완료. 앱 종료 후 적용됩니다.");
+      checkUpdateEl.textContent = "지금 재시작";
+      checkUpdateEl.disabled = false;
+      showToast("업데이트 다운로드 완료. '지금 재시작'을 눌러 적용하세요.");
       break;
     case "not-available":
       checkUpdateEl.textContent = "최신 버전";
@@ -284,9 +288,25 @@ async function init() {
   refreshAttendanceEl?.addEventListener("click", () => refreshAttendance({ silent: false }));
   setupModeChangeListener();
 
-  // 업데이트 확인 버튼 (작동정보 화면)
+  // 업데이트 확인 버튼 (작동정보 화면) — 다운로드 완료 시 '지금 재시작'으로 즉시 적용
   if (checkUpdateEl && window.pcoffApi?.requestUpdateCheck) {
     checkUpdateEl.addEventListener("click", async () => {
+      if (lastUpdateStatus?.state === "downloaded" && window.pcoffApi.quitAndInstallUpdate) {
+        try {
+          const result = await window.pcoffApi.quitAndInstallUpdate();
+          if (result?.applied) {
+            checkUpdateEl.textContent = "재시작 중...";
+            checkUpdateEl.disabled = true;
+            showToast("앱을 종료하고 업데이트를 적용합니다.");
+          } else {
+            showToast("적용할 업데이트가 없습니다.");
+          }
+        } catch (e) {
+          console.warn("quitAndInstallUpdate failed", e);
+          showToast("재시작 적용 오류");
+        }
+        return;
+      }
       checkUpdateEl.disabled = true;
       checkUpdateEl.textContent = "확인 중...";
       try {
@@ -299,6 +319,11 @@ async function init() {
         checkUpdateEl.textContent = "업데이트 확인";
       }
     });
+    if (window.pcoffApi.getUpdateStatus) {
+      window.pcoffApi.getUpdateStatus().then((status) => {
+        if (status?.state === "downloaded") updateCheckButton(status);
+      });
+    }
     if (window.pcoffApi.onUpdateProgress) {
       window.pcoffApi.onUpdateProgress((data) => {
         if (checkUpdateEl && data) updateCheckButton(data);

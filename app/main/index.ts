@@ -101,6 +101,21 @@ function formatYmdHm(date: Date): string {
   return `${y}${m}${d}${h}${min}`;
 }
 
+/** YYYYMMDDHH24MI(12자) → Date. 백엔드 pcOnYmdTime/pcOffYmdTime 파싱용. */
+function parseYmdHm(value: string | undefined): Date | null {
+  if (!value || String(value).length < 12) return null;
+  const s = String(value);
+  const y = parseInt(s.slice(0, 4), 10);
+  const m = parseInt(s.slice(4, 6), 10) - 1;
+  const d = parseInt(s.slice(6, 8), 10);
+  const h = parseInt(s.slice(8, 10), 10);
+  const min = parseInt(s.slice(10, 12), 10);
+  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d) || Number.isNaN(h) || Number.isNaN(min))
+    return null;
+  const date = new Date(y, m, d, h, min, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /** 터미널에 설정/로드된 값 출력 (디버깅·확인용) */
 function logLoadedConfig(label: string, payload: Record<string, unknown>): void {
   console.log("[PCOFF] 설정값:", label, JSON.stringify(payload, null, 2));
@@ -559,7 +574,14 @@ function setOperationMode(mode: OperationMode): void {
   }
 }
 
-/** 서버 근태 기준 잠금 필요 여부: getPcOffWorkTime 응답의 pcOnYn === "N" 이면 사용시간 종료(잠금). 설계: 서버가 조정해 회신한 값으로만 판단. */
+/**
+ * 서버 근태 기준 잠금 필요 여부.
+ * 백엔드 정책: 잠금/잠금해제는 pcOnYmdTime(PC-ON 시각), pcOffYmdTime(PC-OFF 시각, 임시연장 반영) 두 값으로만 판단.
+ * - 현재 시각 < pcOnYmdTime → 잠금(시업 전)
+ * - 현재 시각 >= pcOffYmdTime → 잠금(종업 후)
+ * - pcOnYmdTime <= 현재 시각 < pcOffYmdTime → 잠금 해제(사용 가능)
+ * (pcOnYn은 해당 일자의 PC 사용 가능 여부일 뿐, 실시간 잠금 기준이 아님)
+ */
 async function isLockRequired(): Promise<boolean> {
   // FR-15: 긴급해제 활성 중이면 잠금 스킵
   if (emergencyUnlockManager?.isActive) return false;
@@ -598,6 +620,16 @@ async function isLockRequired(): Promise<boolean> {
       emergencyUnlockMaxFailures: data.emergencyUnlockMaxFailures
     });
     void offlineManager.reportApiSuccess();
+
+    // 잠금 기준: pcOnYmdTime / pcOffYmdTime 시각 비교 (백엔드 정책)
+    const pcOnTime = parseYmdHm(data.pcOnYmdTime);
+    const pcOffTime = parseYmdHm(data.pcOffYmdTime);
+    const now = new Date();
+    if (pcOnTime && pcOffTime) {
+      const locked = now < pcOnTime || now >= pcOffTime;
+      return locked;
+    }
+    // 파싱 불가 시 기존 pcOnYn fallback (하위 호환)
     return data.pcOnYn === "N";
   } catch {
     void offlineManager.reportApiFailure("api");
@@ -968,6 +1000,14 @@ ipcMain.handle("pcoff:requestUpdateCheck", async () => {
   const status = await updater.checkAndApplySilently();
   return status;
 });
+/** 다운로드된 업데이트가 있으면 즉시 종료 후 설치 실행. 트레이 앱은 창만 닫으면 before-quit가 호출되지 않으므로 이 IPC로 명시적 재시작. */
+ipcMain.handle("pcoff:quitAndInstallUpdate", async () => {
+  if (!updater.hasDownloadedUpdate()) return { applied: false };
+  // Windows NSIS: quitAndInstall 직후 설치 프로세스가 스폰되기 전에 앱이 종료되는 이슈 완화를 위해 짧은 지연
+  await new Promise((r) => setTimeout(r, 400));
+  const applied = updater.quitAndInstallIfDownloaded();
+  return { applied };
+});
 ipcMain.handle("pcoff:getUpdateStatus", async () => updater.getStatus());
 ipcMain.handle("pcoff:getAppVersion", async () => updater.getAppVersion());
 ipcMain.handle("pcoff:getLogsPath", () => join(baseDir, PATHS.logsDir));
@@ -1314,7 +1354,7 @@ ipcMain.handle("pcoff:getOperationMode", async () => {
   return { mode: currentMode };
 });
 
-// 로그인 성공 후: 사용시간 종료(pcOnYn=N)일 때만 잠금화면 표시 (호출한 창을 재사용해 새 창 안 띄움)
+// 로그인 성공 후: pcOnYmdTime/pcOffYmdTime 기준 잠금 필요 시 잠금화면 표시 (호출한 창을 재사용해 새 창 안 띄움)
 ipcMain.handle("pcoff:checkLockAndShow", async (event) => {
   // FR-12: 로그인 직후 reporter 컨텍스트 갱신 및 시작
   const cfg = await loadRuntimeConfig(baseDir);

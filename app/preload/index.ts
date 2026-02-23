@@ -71,6 +71,7 @@ const api = {
       corpNm?: string;
     }>,
   requestUpdateCheck: () => ipcRenderer.invoke("pcoff:requestUpdateCheck") as Promise<UpdateStatus>,
+  quitAndInstallUpdate: () => ipcRenderer.invoke("pcoff:quitAndInstallUpdate") as Promise<{ applied: boolean }>,
   getUpdateStatus: () => ipcRenderer.invoke("pcoff:getUpdateStatus") as Promise<UpdateStatus>,
   getAppVersion: () => ipcRenderer.invoke("pcoff:getAppVersion") as Promise<string>,
   getLogsPath: () => ipcRenderer.invoke("pcoff:getLogsPath") as Promise<string>,
@@ -165,7 +166,7 @@ const api = {
   },
 
   // 창 제어
-  /** 사용시간 종료(pcOnYn=N)일 때만 잠금화면 열기. 로그인 성공 후 호출 */
+  /** pcOnYmdTime/pcOffYmdTime 기준 잠금 필요 시 잠금화면 열기. 로그인 성공 후 호출 */
   checkLockAndShow: () =>
     ipcRenderer.invoke("pcoff:checkLockAndShow") as Promise<{ lockOpened: boolean }>,
   openLockWindow: () => ipcRenderer.invoke("pcoff:openLockWindow") as Promise<{ success: boolean }>,

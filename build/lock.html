@@ -53,6 +53,9 @@
             <button id="btn-use" class="button ghost">
               <span>긴급사용</span>
             </button>
+            <button id="btn-emergency-unlock" class="button ghost" style="display:none;">
+              <span>긴급해제</span>
+            </button>
           </div>
           <div class="time-box">
             <span id="date-text"></span>
@@ -99,6 +102,38 @@
           <button id="leave-seat-modal-cancel" class="button ghost">취소</button>
           <button id="leave-seat-modal-confirm" class="button primary">PC-ON</button>
         </div>
+      </div>
+    </div>
+
+    <!-- FR-15: 긴급해제 모달 -->
+    <div id="emergency-unlock-modal" class="modal-overlay hidden" aria-label="긴급해제">
+      <div class="modal-box">
+        <h2 class="modal-title">긴급해제</h2>
+        <p class="modal-desc">비밀번호를 입력하여 잠금을 해제합니다.</p>
+        <input id="emergency-unlock-password" type="password" class="login-input modal-input" placeholder="비밀번호 입력" maxlength="100" autocomplete="off" />
+        <p id="emergency-unlock-hint" class="modal-hint" style="display:none;"></p>
+        <div class="modal-actions">
+          <button id="emergency-unlock-cancel" class="button ghost">취소</button>
+          <button id="emergency-unlock-confirm" class="button primary">확인</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FR-15: 긴급해제 만료 예고 토스트 -->
+    <div id="emergency-unlock-expiry-banner" class="toast" style="display:none;background:#e67e22;color:#fff;position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;padding:10px 24px;border-radius:8px;font-size:14px;"></div>
+
+    <!-- FR-17: 오프라인 유예/잠금 UI -->
+    <div id="offline-overlay" class="modal-overlay hidden" aria-label="오프라인 상태">
+      <div class="modal-box" style="min-width:420px;text-align:center;">
+        <div id="offline-icon" style="font-size:48px;margin-bottom:12px;">⚠️</div>
+        <h2 id="offline-title" class="modal-title">네트워크 연결이 끊어졌습니다</h2>
+        <p id="offline-desc" class="modal-desc">네트워크 복구까지 남은 시간을 확인하세요.</p>
+        <div id="offline-countdown" style="font-size:28px;font-weight:bold;margin:16px 0;font-variant-numeric:tabular-nums;">30:00</div>
+        <div class="modal-actions" style="flex-wrap:wrap;gap:8px;">
+          <button id="offline-retry-btn" class="button primary">다시 시도</button>
+          <button id="offline-settings-btn" class="button ghost" style="display:none;">네트워크 설정</button>
+        </div>
+        <p id="offline-retry-info" class="modal-hint" style="margin-top:8px;display:none;"></p>
       </div>
     </div>
 

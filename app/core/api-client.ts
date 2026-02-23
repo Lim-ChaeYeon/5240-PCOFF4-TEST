@@ -17,6 +17,16 @@ export interface WorkTimeResponse {
   /** 이석 판정 기준 시간(분). 유휴/절전 경과 >= 이 값이면 이석 처리 */
   leaveSeatTime?: number;
   emergencyUseYesNo?: "YES" | "NO";
+  /** FR-15: 긴급해제 기능 사용 여부 */
+  emergencyUnlockUseYn?: "YES" | "NO";
+  /** FR-15: 긴급해제 비밀번호 설정 여부 */
+  emergencyUnlockPasswordSetYn?: "Y" | "N";
+  /** FR-15: 긴급해제 허용 시간(분). 서버 옵션. 기본 180(3시간) */
+  emergencyUnlockTime?: number;
+  /** FR-15: 긴급해제 최대 실패 횟수. 서버 옵션. 기본 5 */
+  emergencyUnlockMaxFailures?: number;
+  /** FR-15: 긴급해제 차단 시간(초). 서버 옵션. 기본 300(5분) */
+  emergencyUnlockLockoutSeconds?: number;
   /** 비밀번호 변경 필요 여부 (서버에서 플래그 제공 시) */
   pwdChgYn?: "Y" | "N";
   /** 비밀번호 변경 메시지 */
@@ -44,6 +54,20 @@ export interface PcOnOffLogRequest {
 
 export interface EmergencyUseRequest {
   reason: string;
+}
+
+/** FR-15: 긴급해제 요청 */
+export interface EmergencyUnlockRequest {
+  password: string;
+  reason?: string;
+}
+
+/** FR-15: 긴급해제 응답 */
+export interface EmergencyUnlockResponse {
+  success: boolean;
+  remainingAttempts?: number;
+  lockoutUntil?: string;
+  message?: string;
 }
 
 /** 서비스 영역 조회 응답 (전화번호로 조회) */
@@ -189,6 +213,19 @@ export class PcOffApiClient {
       userStaffId: this.config.userStaffId,
       reason: request.reason
     });
+  }
+
+  /** FR-15: 긴급해제 — 비밀번호 검증 후 잠금 해제 */
+  async callPcOffEmergencyUnlock(request: EmergencyUnlockRequest): Promise<EmergencyUnlockResponse> {
+    const raw = await this.post("/callPcOffEmergencyUnlock.do", {
+      workYmd: this.config.workYmd,
+      userServareaId: this.config.userServareaId,
+      userStaffId: this.config.userStaffId,
+      password: request.password,
+      reason: request.reason ?? ""
+    });
+    if (Array.isArray(raw)) return (raw[0] ?? { success: false }) as EmergencyUnlockResponse;
+    return (raw ?? { success: false }) as EmergencyUnlockResponse;
   }
 }
 

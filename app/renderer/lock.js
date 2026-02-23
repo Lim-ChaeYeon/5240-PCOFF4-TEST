@@ -416,6 +416,101 @@ function setupPasswordChangeListener() {
   }
 }
 
+/* ──── FR-15: 긴급해제 ──── */
+const btnEmergencyUnlockEl = document.getElementById("btn-emergency-unlock");
+
+async function checkEmergencyUnlockEligibility() {
+  if (!window.pcoffApi?.getEmergencyUnlockEligibility || !btnEmergencyUnlockEl) return;
+  try {
+    const elig = await window.pcoffApi.getEmergencyUnlockEligibility();
+    btnEmergencyUnlockEl.style.display = elig.eligible ? "" : "none";
+  } catch {
+    btnEmergencyUnlockEl.style.display = "none";
+  }
+}
+
+function showEmergencyUnlockModal() {
+  const overlay = document.getElementById("emergency-unlock-modal");
+  const input = document.getElementById("emergency-unlock-password");
+  const hintEl = document.getElementById("emergency-unlock-hint");
+  const btnCancel = document.getElementById("emergency-unlock-cancel");
+  const btnConfirm = document.getElementById("emergency-unlock-confirm");
+  if (!overlay || !input) return;
+
+  input.value = "";
+  if (hintEl) { hintEl.style.display = "none"; hintEl.textContent = ""; }
+  overlay.classList.remove("hidden");
+  input.focus();
+
+  const cleanup = () => {
+    overlay.classList.add("hidden");
+    btnCancel?.removeEventListener("click", onCancel);
+    btnConfirm?.removeEventListener("click", onConfirm);
+    overlay.removeEventListener("click", onOverlayClick);
+    input.removeEventListener("keydown", onKeydown);
+  };
+  const onCancel = () => cleanup();
+  const onConfirm = async () => {
+    const password = input.value.trim();
+    if (!password) {
+      showToast("비밀번호를 입력해 주세요.");
+      return;
+    }
+    btnConfirm.disabled = true;
+    btnConfirm.textContent = "확인 중...";
+    try {
+      const result = await window.pcoffApi.requestEmergencyUnlock(password);
+      if (result.success) {
+        showToast("긴급해제 성공 (설정된 시간 후 자동 잠금)");
+        cleanup();
+      } else {
+        if (hintEl) {
+          hintEl.style.display = "";
+          hintEl.textContent = result.message;
+          hintEl.style.color = "#e74c3c";
+        }
+        input.value = "";
+        input.focus();
+      }
+    } catch (e) {
+      showToast("긴급해제 오류");
+    } finally {
+      btnConfirm.disabled = false;
+      btnConfirm.textContent = "확인";
+    }
+  };
+  const onOverlayClick = (e) => { if (e.target === overlay) cleanup(); };
+  const onKeydown = (e) => {
+    if (e.key === "Escape") cleanup();
+    if (e.key === "Enter") onConfirm();
+  };
+  btnCancel?.addEventListener("click", onCancel);
+  btnConfirm?.addEventListener("click", onConfirm);
+  overlay.addEventListener("click", onOverlayClick);
+  input.addEventListener("keydown", onKeydown);
+}
+
+function setupEmergencyUnlockListeners() {
+  btnEmergencyUnlockEl?.addEventListener("click", () => showEmergencyUnlockModal());
+
+  if (window.pcoffApi?.onEmergencyUnlockExpiring) {
+    window.pcoffApi.onEmergencyUnlockExpiring((data) => {
+      const banner = document.getElementById("emergency-unlock-expiry-banner");
+      if (banner) {
+        banner.textContent = `긴급해제가 ${Math.ceil(data.remainingSec / 60)}분 후 만료됩니다.`;
+        banner.style.display = "";
+        setTimeout(() => { banner.style.display = "none"; }, 15000);
+      }
+    });
+  }
+
+  if (window.pcoffApi?.onEmergencyUnlockExpired) {
+    window.pcoffApi.onEmergencyUnlockExpired(() => {
+      showToast("긴급해제가 만료되어 잠금 상태로 전환됩니다.");
+    });
+  }
+}
+
 /* ──── FR-17: 오프라인 유예/잠금 UI ──── */
 let offlineCountdownTimer = null;
 
@@ -624,6 +719,8 @@ async function bootstrap() {
 
   setupPasswordChangeListener();
   setupConnectivityListener();
+  setupEmergencyUnlockListeners();
+  void checkEmergencyUnlockEligibility();
 
   // 잠금화면 로그
   if (window.pcoffApi?.logEvent) {

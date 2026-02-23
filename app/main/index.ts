@@ -21,6 +21,7 @@ import { TelemetryLogger } from "../core/telemetry-log.js";
 import { UpdateManager } from "../core/update-manager.js";
 import { OpsObserver } from "../core/ops-observer.js";
 import { OfflineManager, type ConnectivityState } from "../core/offline-manager.js";
+import { EmergencyUnlockManager } from "../core/emergency-unlock.js";
 import { AuthPolicy } from "../core/auth-policy.js";
 import { AgentGuard } from "../core/agent-guard.js";
 import { PcOffApiClient, PcOffAuthClient, type WorkTimeResponse } from "../core/api-client.js";
@@ -80,6 +81,7 @@ let authPolicy: AuthPolicy;
 let guard: AgentGuard;
 let leaveSeatReporter: LeaveSeatReporter;
 let offlineManager: OfflineManager;
+let emergencyUnlockManager: EmergencyUnlockManager;
 
 function getTodayYmd(): string {
   const now = new Date();
@@ -559,6 +561,9 @@ function setOperationMode(mode: OperationMode): void {
 
 /** 서버 근태 기준 잠금 필요 여부: getPcOffWorkTime 응답의 pcOnYn === "N" 이면 사용시간 종료(잠금). 설계: 서버가 조정해 회신한 값으로만 판단. */
 async function isLockRequired(): Promise<boolean> {
+  // FR-15: 긴급해제 활성 중이면 잠금 스킵
+  if (emergencyUnlockManager?.isActive) return false;
+
   const api = await getApiClient();
   if (!api) {
     return false;
@@ -572,6 +577,12 @@ async function isLockRequired(): Promise<boolean> {
       leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
       leaveSeatTimeMinutes: Number(data.leaveSeatTime ?? 0) || 0
     });
+    // FR-15: 서버 정책으로 긴급해제 시간·시도제한·차단시간 갱신
+    emergencyUnlockManager?.updatePolicy({
+      unlockTimeMinutes: Number(data.emergencyUnlockTime ?? 0) || undefined,
+      maxFailures: Number(data.emergencyUnlockMaxFailures ?? 0) || undefined,
+      lockoutSeconds: Number(data.emergencyUnlockLockoutSeconds ?? 0) || undefined
+    });
     const wt = data as Record<string, unknown>;
     logLoadedConfig("근태정보 (getPcOffWorkTime)", {
       pcOnYn: data.pcOnYn,
@@ -582,7 +593,9 @@ async function isLockRequired(): Promise<boolean> {
       leaveSeatTime: data.leaveSeatTime,
       leaveSeatReasonYn: data.leaveSeatReasonYn,
       leaveSeatReasonManYn: data.leaveSeatReasonManYn,
-      pcoffEmergencyYesNo: data.pcoffEmergencyYesNo
+      pcoffEmergencyYesNo: data.pcoffEmergencyYesNo,
+      emergencyUnlockTime: data.emergencyUnlockTime,
+      emergencyUnlockMaxFailures: data.emergencyUnlockMaxFailures
     });
     void offlineManager.reportApiSuccess();
     return data.pcOnYn === "N";
@@ -744,6 +757,24 @@ app.whenReady().then(async () => {
       });
     }
   })();
+
+  // FR-15: Emergency Unlock Manager 초기화
+  emergencyUnlockManager = new EmergencyUnlockManager(baseDir, logger);
+  emergencyUnlockManager.setCallback((event) => {
+    if (event === "expired") {
+      setOperationMode("NORMAL");
+      // 긴급해제 만료 → 잠금 필요 여부 재확인
+      void checkLockAndShowLockWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("pcoff:emergency-unlock-expired", {});
+      }
+    } else if (event === "expiry_warning") {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("pcoff:emergency-unlock-expiring", { remainingSec: 300 });
+      }
+    }
+  });
+  await emergencyUnlockManager.restore();
 
   // FR-17: Offline Manager 초기화 — heartbeat/API 실패 기반 오프라인 감지·유예·잠금
   offlineManager = new OfflineManager(baseDir, logger);
@@ -918,6 +949,7 @@ app.on("before-quit", async (e) => {
   leaveSeatDetector.stop();
   leaveSeatReporter?.stop();
   offlineManager?.stop();
+  emergencyUnlockManager?.stop();
   observer?.stop();
   await guard?.stop();
 });
@@ -1065,6 +1097,11 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
       leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
       leaveSeatTimeMinutes: Number(data.leaveSeatTime ?? 0) || 0
     });
+    emergencyUnlockManager?.updatePolicy({
+      unlockTimeMinutes: Number(data.emergencyUnlockTime ?? 0) || undefined,
+      maxFailures: Number(data.emergencyUnlockMaxFailures ?? 0) || undefined,
+      lockoutSeconds: Number(data.emergencyUnlockLockoutSeconds ?? 0) || undefined
+    });
     const wt = data as Record<string, unknown>;
     logLoadedConfig("근태정보 (getWorkTime IPC)", {
       source: "api",
@@ -1075,7 +1112,8 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
       leaveSeatUseYn: data.leaveSeatUseYn,
       leaveSeatTime: data.leaveSeatTime,
       leaveSeatReasonYn: data.leaveSeatReasonYn,
-      leaveSeatReasonManYn: data.leaveSeatReasonManYn
+      leaveSeatReasonManYn: data.leaveSeatReasonManYn,
+      emergencyUnlockTime: data.emergencyUnlockTime
     });
 
     // FR-04: 비밀번호 변경 감지
@@ -1331,4 +1369,36 @@ ipcMain.handle("pcoff:retryConnectivity", async () => {
     return res.ok;
   });
   return { recovered, snapshot: offlineManager.getSnapshot() };
+});
+
+// FR-15: 긴급해제 IPC
+ipcMain.handle("pcoff:requestEmergencyUnlock", async (_event, payload: { password: string; reason?: string }) => {
+  const api = await getApiClient();
+  if (!api) return { success: false, message: "API 클라이언트를 사용할 수 없습니다.", remainingAttempts: 0 };
+  const result = await emergencyUnlockManager.attempt(api, payload.password, payload.reason);
+  if (result.success) {
+    setOperationMode("EMERGENCY_RELEASE");
+    void createTrayInfoWindow();
+  }
+  return result;
+});
+
+ipcMain.handle("pcoff:getEmergencyUnlockState", async () => {
+  return emergencyUnlockManager.getState();
+});
+
+ipcMain.handle("pcoff:getEmergencyUnlockEligibility", async () => {
+  const unlockUseYn = String(lastWorkTimeData.emergencyUnlockUseYn ?? "NO").toUpperCase();
+  const pwdSetYn = String(lastWorkTimeData.emergencyUnlockPasswordSetYn ?? "N").toUpperCase();
+  const isLocked = currentScreen === "lock";
+  const eligible = unlockUseYn === "YES" && (pwdSetYn === "Y" || pwdSetYn === "YES") && isLocked;
+  return {
+    eligible,
+    emergencyUnlockUseYn: unlockUseYn,
+    emergencyUnlockPasswordSetYn: pwdSetYn,
+    isLocked,
+    isLockedOut: emergencyUnlockManager.isLockedOut,
+    remainingLockoutMs: emergencyUnlockManager.remainingLockoutMs,
+    isActive: emergencyUnlockManager.isActive
+  };
 });

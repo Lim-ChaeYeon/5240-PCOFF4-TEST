@@ -175,6 +175,43 @@ const api = {
   logEvent: (code: string, payload: Record<string, unknown>) =>
     ipcRenderer.invoke("pcoff:logEvent", { code, payload }) as Promise<void>,
 
+  // FR-15: 긴급해제
+  requestEmergencyUnlock: (password: string, reason?: string) =>
+    ipcRenderer.invoke("pcoff:requestEmergencyUnlock", { password, reason }) as Promise<{
+      success: boolean;
+      message: string;
+      remainingAttempts: number;
+      lockedUntil?: string;
+    }>,
+  getEmergencyUnlockState: () =>
+    ipcRenderer.invoke("pcoff:getEmergencyUnlockState") as Promise<{
+      active: boolean;
+      startAt: string | null;
+      expiresAt: string | null;
+      failureCount: number;
+      lockedUntil: string | null;
+    }>,
+  getEmergencyUnlockEligibility: () =>
+    ipcRenderer.invoke("pcoff:getEmergencyUnlockEligibility") as Promise<{
+      eligible: boolean;
+      emergencyUnlockUseYn: string;
+      emergencyUnlockPasswordSetYn: string;
+      isLocked: boolean;
+      isLockedOut: boolean;
+      remainingLockoutMs: number;
+      isActive: boolean;
+    }>,
+  onEmergencyUnlockExpiring: (callback: (data: { remainingSec: number }) => void) => {
+    const handler = (_event: IpcRendererEvent, data: { remainingSec: number }) => callback(data);
+    ipcRenderer.on("pcoff:emergency-unlock-expiring", handler);
+    return () => ipcRenderer.removeListener("pcoff:emergency-unlock-expiring", handler);
+  },
+  onEmergencyUnlockExpired: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("pcoff:emergency-unlock-expired", handler);
+    return () => ipcRenderer.removeListener("pcoff:emergency-unlock-expired", handler);
+  },
+
   // FR-17: 오프라인 상태 조회·재시도
   getConnectivityState: () =>
     ipcRenderer.invoke("pcoff:getConnectivityState") as Promise<{

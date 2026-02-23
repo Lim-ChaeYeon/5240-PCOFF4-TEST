@@ -193,7 +193,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **이석 감지·해제 플로우 (FR-11)**: `app/core/leave-seat.ts`. `screenType=empty` 감지 → `leaveSeatReasonYn/ManYn=YES`이면 사유 입력 모달 → `callCmmPcOnOffLogPrc(IN, reason)`. 휴게시간(`breakStartTime~breakEndTime`) 중이면 사유 면제. 시뮬레이터 Flow-02/02b PASS. ✅
 - **로컬 이석/절전 감지 (FR-11)**: `app/core/leave-seat-detector.ts`. 유휴(Idle): `powerMonitor.getSystemIdleTime()` 5초 폴링, API 정책(`leaveSeatUseYn`, `leaveSeatTime` 분) 초과 시 잠금화면. 절전: suspend 시각 기록, resume 시 경과 >= leaveSeatTime 이면 이석 잠금(감지시각=절전 시작). `getWorkTime` 응답에 로컬 이석 병합. **API 정규화**: 서버가 `leaveSeatUseYn`을 `"YES"`/`"NO"`로 내려줘도 `normalizeLeaveSeatUseYn()`으로 `"Y"`/`"N"` 변환 후 정책 적용. ✅
 - **이석정보 서버 전송 (FR-12)**: `app/core/leave-seat-reporter.ts`. 세션 기반(`leaveSeatSessionId`) START/END 전송(`POST /reportLeaveSeatEvent.do`). 이석 감지 시 START, PC-ON 해제 시 END. 재시도 큐(`leave-seat-queue.jsonl`) + 지수 백오프, 30초 주기 플러시. ✅
-- **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callCmmPcOnOffLogPrc, reportLeaveSeatEvent
+- **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callPcOffEmergencyUnlock, callCmmPcOnOffLogPrc, reportLeaveSeatEvent
 - **시뮬레이터·CI**: Flow-01~08 시나리오, parity-report.json, parity-summary.md, CI 아티팩트
 - **로깅**: JSONL, TelemetryLogger. LOG_CODES 상수로 APP_START, LOGIN_SUCCESS/FAIL, LOGOUT, LOCK/UNLOCK_TRIGGERED, UPDATE_*, AGENT_*, INSTALLER_REGISTRY_SYNC/FAIL, TRAY_*, LEAVE_SEAT_* 등 기록 (logcode.md·constants.ts 참고) ✅
 - **자동 업데이트 (FR-03)**: `electron-updater` 기반 무확인 자동 업데이트, 재시도 큐, 진행률 UI 표시 ✅
@@ -201,6 +201,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **Agent Guard (FR-07)**: 무결성 체크(SHA-256), 파일 감시, 탐지 시 로그·복구 트리거, IPC 연동 ✅
 - **Ops Observer (FR-08)**: heartbeat·로그 배치 서버 전송(`/reportAgentEvents.do`), 크래시/오프라인 보고 ✅
 - **오프라인 복구·잠금 (FR-17)**: OfflineManager(30분 유예 → OFFLINE_LOCKED), heartbeat/API 연속 실패 감지, 잠금화면 오프라인 UI·다시 시도, offline-state.json 저장·복원 ✅
+- **긴급해제 — 비밀번호 기반 (FR-15)**: EmergencyUnlockManager(5회 시도제한·5분 차단, 3시간 만료·5분 전 예고), 잠금화면 비밀번호 모달, callPcOffEmergencyUnlock API 연동 ✅
 - **에이전트 UI·잠금화면 분리**: 트레이 작동정보(`main.html`), 잠금화면(`lock.html`), 로그인(`index.html`) — 단일 창에서 전환, 시스템 트레이 메뉴, 운영 모드 관리 ✅
 - **트레이 아이콘**: `assets/tray-icon.png`(16×16, 5240 로고 스타일). extraResources로 복사·resourcesPath 우선 로드. 파일 없을 때 postbuild 생성·Base64 fallback. macOS setTemplateImage.
 - **CI·릴리스 (패키징)**: 태그 푸시(v*) 시 GitHub Actions로 Windows x64·Mac 빌드 후 GitHub Release 업로드. Release 자산은 `latest.yml`/`latest-mac.yml` 등 경로 없이 업로드되어 electron-updater가 인식. Windows → .exe, Mac → .dmg/.zip. ✅
@@ -229,7 +230,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 | ~~10~~ | ~~이석정보 서버 전송~~ | LEAVE_SEAT_START/END 세션 매핑, 재시도 큐 (FR-12, Flow-10) **완료** ✅ |
 | ~~11~~ | ~~시업/종업 화면 로직~~ | exCountRenewal 기준 시업/종업 구분, resolveScreenType·캐시 반영 **완료** ✅ |
 | 12 | 고객사 설정 반영 | 문구·이미지·로고·긴급해제·이석해제 비밀번호 (FR-14) |
-| 13 | 긴급해제 (비밀번호) | 비밀번호 검증, 시도제한, 3시간 만료 (FR-15, Flow-12) |
+| ~~13~~ | ~~긴급해제 (비밀번호)~~ | ~~비밀번호 검증, 시도제한, 3시간 만료 (FR-15, Flow-12)~~ **완료** ✅ |
 | ~~-~~ | ~~트레이 작동정보~~ | ~~근태·버전·모드 표시 (FR-16, Flow-14)~~ **완료** ✅ |
 
 상세 내용은 **[docs/다음_개발_진행_사항.md](docs/다음_개발_진행_사항.md)** 참고.

@@ -11,7 +11,8 @@ export const PATHS = {
   retryQueue: "update/retry-queue.json",
   installerRegistry: "installer-registry.json",
   leaveSeatQueue: "leave-seat-queue.jsonl",
-  offlineState: "offline-state.json"
+  offlineState: "offline-state.json",
+  emergencyUnlockState: "emergency-unlock-state.json"
 } as const;
 
 export const LOG_CODES = {
@@ -72,6 +73,14 @@ export const LOG_CODES = {
   OFFLINE_RETRY: "OFFLINE_RETRY",
   OFFLINE_TIMEOUT_LOCK: "OFFLINE_TIMEOUT_LOCK",
   OFFLINE_RECOVERED: "OFFLINE_RECOVERED",
+
+  // 긴급해제 (FR-15)
+  EMERGENCY_UNLOCK_ATTEMPT: "EMERGENCY_UNLOCK_ATTEMPT",
+  EMERGENCY_UNLOCK_SUCCESS: "EMERGENCY_UNLOCK_SUCCESS",
+  EMERGENCY_UNLOCK_FAILED: "EMERGENCY_UNLOCK_FAILED",
+  EMERGENCY_UNLOCK_LOCKED: "EMERGENCY_UNLOCK_LOCKED",
+  EMERGENCY_UNLOCK_EXPIRED: "EMERGENCY_UNLOCK_EXPIRED",
+  EMERGENCY_UNLOCK_EXPIRY_WARNING: "EMERGENCY_UNLOCK_EXPIRY_WARNING",
 
   // 트레이 작동정보 (FR-16)
   TRAY_INFO_OPENED: "TRAY_INFO_OPENED",

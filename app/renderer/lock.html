@@ -102,6 +102,21 @@
       </div>
     </div>
 
+    <!-- FR-17: 오프라인 유예/잠금 UI -->
+    <div id="offline-overlay" class="modal-overlay hidden" aria-label="오프라인 상태">
+      <div class="modal-box" style="min-width:420px;text-align:center;">
+        <div id="offline-icon" style="font-size:48px;margin-bottom:12px;">⚠️</div>
+        <h2 id="offline-title" class="modal-title">네트워크 연결이 끊어졌습니다</h2>
+        <p id="offline-desc" class="modal-desc">네트워크 복구까지 남은 시간을 확인하세요.</p>
+        <div id="offline-countdown" style="font-size:28px;font-weight:bold;margin:16px 0;font-variant-numeric:tabular-nums;">30:00</div>
+        <div class="modal-actions" style="flex-wrap:wrap;gap:8px;">
+          <button id="offline-retry-btn" class="button primary">다시 시도</button>
+          <button id="offline-settings-btn" class="button ghost" style="display:none;">네트워크 설정</button>
+        </div>
+        <p id="offline-retry-info" class="modal-hint" style="margin-top:8px;display:none;"></p>
+      </div>
+    </div>
+
     <!-- FR-04: 비밀번호 변경 확인 모달 (검증 없이 확인만) -->
     <div id="password-change-modal" class="modal-overlay hidden" aria-label="비밀번호 변경 확인">
       <div class="modal-box">

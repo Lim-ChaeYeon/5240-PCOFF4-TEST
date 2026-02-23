@@ -173,7 +173,34 @@ const api = {
 
   // 로그 이벤트 (선택적)
   logEvent: (code: string, payload: Record<string, unknown>) =>
-    ipcRenderer.invoke("pcoff:logEvent", { code, payload }) as Promise<void>
+    ipcRenderer.invoke("pcoff:logEvent", { code, payload }) as Promise<void>,
+
+  // FR-17: 오프라인 상태 조회·재시도
+  getConnectivityState: () =>
+    ipcRenderer.invoke("pcoff:getConnectivityState") as Promise<{
+      state: "ONLINE" | "OFFLINE_GRACE" | "OFFLINE_LOCKED";
+      offlineSince: string | null;
+      deadline: string | null;
+      locked: boolean;
+      lastRetryAt: string | null;
+      retryCount: number;
+    }>,
+  retryConnectivity: () =>
+    ipcRenderer.invoke("pcoff:retryConnectivity") as Promise<{
+      recovered: boolean;
+      snapshot: {
+        state: "ONLINE" | "OFFLINE_GRACE" | "OFFLINE_LOCKED";
+        offlineSince: string | null;
+        deadline: string | null;
+        locked: boolean;
+      };
+    }>,
+  onConnectivityChanged: (callback: (data: { state: "ONLINE" | "OFFLINE_GRACE" | "OFFLINE_LOCKED" }) => void) => {
+    const handler = (_event: IpcRendererEvent, data: { state: "ONLINE" | "OFFLINE_GRACE" | "OFFLINE_LOCKED" }) =>
+      callback(data);
+    ipcRenderer.on("pcoff:connectivity-changed", handler);
+    return () => ipcRenderer.removeListener("pcoff:connectivity-changed", handler);
+  }
 };
 
 contextBridge.exposeInMainWorld("pcoffApi", api);

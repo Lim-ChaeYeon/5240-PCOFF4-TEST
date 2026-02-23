@@ -10,7 +10,8 @@ export const PATHS = {
   updateDir: "update",
   retryQueue: "update/retry-queue.json",
   installerRegistry: "installer-registry.json",
-  leaveSeatQueue: "leave-seat-queue.jsonl"
+  leaveSeatQueue: "leave-seat-queue.jsonl",
+  offlineState: "offline-state.json"
 } as const;
 
 export const LOG_CODES = {
@@ -65,6 +66,12 @@ export const LOG_CODES = {
   LEAVE_SEAT_END: "LEAVE_SEAT_END",
   LEAVE_SEAT_REPORT_FAILED: "LEAVE_SEAT_REPORT_FAILED",
   LEAVE_SEAT_REPORT_RETRY: "LEAVE_SEAT_REPORT_RETRY",
+
+  // 오프라인 복구·잠금 (FR-17)
+  OFFLINE_GRACE_STARTED: "OFFLINE_GRACE_STARTED",
+  OFFLINE_RETRY: "OFFLINE_RETRY",
+  OFFLINE_TIMEOUT_LOCK: "OFFLINE_TIMEOUT_LOCK",
+  OFFLINE_RECOVERED: "OFFLINE_RECOVERED",
 
   // 트레이 작동정보 (FR-16)
   TRAY_INFO_OPENED: "TRAY_INFO_OPENED",

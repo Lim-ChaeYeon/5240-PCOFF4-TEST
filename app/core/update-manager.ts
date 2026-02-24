@@ -95,9 +95,9 @@ export class UpdateManager {
       // 0.2.5-2 → 0.2.5-3 같은 프리릴리스 간 업데이트 인식 (GitHub에서 Pre-release 체크 해제한 릴리스 포함)
       (autoUpdater as { allowPrerelease?: boolean }).allowPrerelease = true;
 
-      // 자동 다운로드 활성화 (무확인 자동 적용)
+      // 자동 다운로드 활성화. 설치 적용은 사용자가 '지금 재시작' 버튼을 눌렀을 때만 수행(quitAndInstall은 IPC pcoff:quitAndInstallUpdate에서만 호출).
       autoUpdater.autoDownload = true;
-      autoUpdater.autoInstallOnAppQuit = true;
+      autoUpdater.autoInstallOnAppQuit = false;
 
       // 이벤트 리스너 설정
       autoUpdater.on("checking-for-update", () => {

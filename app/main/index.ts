@@ -254,10 +254,16 @@ function getRendererUrl(htmlFile: string): string {
 
 /** 창에 HTML 로드 — 맥 패키징 시 app://, 그 외 loadFile. 반환 Promise로 catch 가능 */
 function loadRendererInWindow(win: BrowserWindow, htmlFile: string): Promise<void> {
-  if (process.platform === "darwin" && app.isPackaged) {
-    return win.loadURL(getRendererUrl(htmlFile));
-  }
-  return win.loadFile(getRendererPath(htmlFile));
+  const pathOrUrl = process.platform === "darwin" && app.isPackaged
+    ? getRendererUrl(htmlFile)
+    : getRendererPath(htmlFile);
+  const p = process.platform === "darwin" && app.isPackaged
+    ? win.loadURL(pathOrUrl as string)
+    : win.loadFile(pathOrUrl as string);
+  return p.catch((err) => {
+    console.error("[PCOFF] loadRendererInWindow failed:", htmlFile, pathOrUrl, err);
+    throw err;
+  });
 }
 
 /**
@@ -701,11 +707,15 @@ async function createLockWindow(): Promise<void> {
     currentScreen = "lock";
     mainWindow.setTitle("PCOFF 잠금화면");
     mainWindow.setVisibleOnAllWorkspaces(true);
-    loadRendererInWindow(mainWindow, "lock.html");
-    mainWindow.show();
-    mainWindow.focus();
-    mainWindow.setAlwaysOnTop(true, "screen-saver");
-    mainWindow.setFullScreen(true);
+    await loadRendererInWindow(mainWindow, "lock.html").catch((err) => {
+      console.error("[PCOFF] 잠금화면 로드 실패:", err);
+    });
+    if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "lock") {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.setAlwaysOnTop(true, "screen-saver");
+      mainWindow.setFullScreen(true);
+    }
     setImmediate(() => {
       if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "lock") {
         mainWindow.focus();
@@ -735,10 +745,19 @@ async function createLockWindow(): Promise<void> {
   attachMainWindowCloseHandler(win);
   attachWindowHotkeys(win);
   win.setVisibleOnAllWorkspaces(true);
-  loadRendererInWindow(win, "lock.html");
-  win.show();
-  win.focus();
-  win.setFullScreen(true);
+  win.webContents.on("did-fail-load", (_event, code, desc, url) => {
+    if (currentScreen === "lock" && url && (url.includes("lock.html") || url.includes("lock"))) {
+      console.error("[PCOFF] 잠금창 did-fail-load:", code, desc, url);
+    }
+  });
+  await loadRendererInWindow(win, "lock.html").catch((err) => {
+    console.error("[PCOFF] 잠금화면 로드 실패:", err);
+  });
+  if (win && !win.isDestroyed() && currentScreen === "lock") {
+    win.show();
+    win.focus();
+    win.setFullScreen(true);
+  }
   setImmediate(() => {
     if (win && !win.isDestroyed() && currentScreen === "lock") {
       win.focus();
@@ -774,11 +793,15 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   currentScreen = "lock";
   win.setTitle("PCOFF 잠금화면");
   win.setVisibleOnAllWorkspaces(true);
-  loadRendererInWindow(win, "lock.html");
-  win.show();
-  win.focus();
-  win.setAlwaysOnTop(true, "screen-saver");
-  win.setFullScreen(true);
+  await loadRendererInWindow(win, "lock.html").catch((err) => {
+    console.error("[PCOFF] 잠금화면 로드 실패 (showLockInWindow):", err);
+  });
+  if (win && !win.isDestroyed() && currentScreen === "lock") {
+    win.show();
+    win.focus();
+    win.setAlwaysOnTop(true, "screen-saver");
+    win.setFullScreen(true);
+  }
   setImmediate(() => {
     if (win && !win.isDestroyed() && currentScreen === "lock") {
       win.focus();
@@ -1001,8 +1024,34 @@ async function isLockRequired(): Promise<boolean> {
   // FR-15: 긴급해제 활성 중이면 잠금 스킵
   if (emergencyUnlockManager?.isActive) return false;
 
+  // 이석(로컬 감지 또는 서버 screenType=empty)이면 무조건 잠금
+  if (localLeaveSeatDetectedAt !== null) return true;
+  if ((lastWorkTimeData.screenType ?? "") === "empty") return true;
+
   const now = new Date();
   if (currentMode === "TEMP_EXTEND" && Object.keys(lastWorkTimeData).length > 0) {
+    // 주기 잠금 검사에서도 서버 이석(screenType=empty) 반영: 최신 근태 조회 후 병합
+    const api = await getApiClient();
+    if (api) {
+      try {
+        const data = await api.getPcOffWorkTime();
+        const extendedEnd = parseYmdHm(String(lastWorkTimeData.pcOffYmdTime ?? ""));
+        if (extendedEnd && extendedEnd > new Date()) {
+          const merged = { ...data } as Record<string, unknown>;
+          merged.pcOffYmdTime = lastWorkTimeData.pcOffYmdTime;
+          merged.pcExCount = lastWorkTimeData.pcExCount;
+          merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
+          lastWorkTimeData = { ...merged };
+          leaveSeatDetector.updatePolicy({
+            leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
+            leaveSeatTimeMinutes: Number(data.leaveSeatTime ?? 0) || 0
+          });
+          if ((merged.screenType ?? "") === "empty") return true;
+        }
+      } catch {
+        // 통신 실패 시 기존 lastWorkTimeData로 시간 기준만 판단
+      }
+    }
     const pcOnTime = parseYmdHm(String(lastWorkTimeData.pcOnYmdTime ?? ""));
     const pcOffTime = parseYmdHm(String(lastWorkTimeData.pcOffYmdTime ?? ""));
     if (pcOnTime && pcOffTime && now < pcOffTime) {
@@ -1045,6 +1094,9 @@ async function isLockRequired(): Promise<boolean> {
       emergencyUnlockMaxFailures: data.emergencyUnlockMaxFailures
     });
     void offlineManager.reportApiSuccess();
+
+    // 이석(서버 screenType=empty)이면 잠금
+    if ((lastWorkTimeData.screenType ?? "") === "empty") return true;
 
     // 잠금 기준: pcOnYmdTime / pcOffYmdTime 시각 비교 (백엔드 정책)
     const pcOnTime = parseYmdHm(data.pcOnYmdTime);
@@ -1504,14 +1556,13 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", async (e) => {
-  // 다운로드 중/대기 중에는 의도치 않은 종료 방지 (다운로드 완료 후 '지금 재시작'으로 적용)
+  // 다운로드 중/대기 중에는 의도치 않은 종료 방지 (사용자가 '지금 재시작'을 누를 때만 적용)
   const updateStatus = updater.getStatus();
   if (updateStatus.state === "downloading" || updateStatus.state === "available") {
     e.preventDefault();
     return;
   }
-  // 다운로드된 업데이트가 있으면 종료 시 설치 실행 (autoInstallOnAppQuit만으로는 미동작할 수 있음)
-  if (updater.quitAndInstallIfDownloaded()) return;
+  // 업데이트 적용은 '지금 재시작' 버튼(IPC pcoff:quitAndInstallUpdate)으로만 수행. 일반 종료 시에는 설치하지 않음.
 
   globalShortcut.unregisterAll();
   stopLockCheckInterval();
@@ -1709,6 +1760,8 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
             });
           }
         }
+        // 서버 이석(screenType=empty) 반영: 주기 잠금 검사·checkLockAndShowLockWindow에서 사용하도록 lastWorkTimeData 갱신 (pcOffYmdTime/pcExCount는 로컬 유지)
+        lastWorkTimeData = { ...merged };
         return { source: "api", data: merged };
       }
     }
@@ -1844,14 +1897,33 @@ ipcMain.handle("pcoff:requestEmergencyUse", async (_event, payload: { reason?: s
   const api = await getApiClient();
   if (!api) return { source: "mock", success: true };
   try {
-    const data = await api.callPcOffEmergencyUse({
+    const raw = await api.callPcOffEmergencyUse({
       emergencyUsePass: payload.emergencyUsePass ?? "",
       reason: payload.reason || "긴급사용 요청"
     });
+    // 서버 응답: 배열 [ { code, msg, ... } ]. KiwiBox JsonService 기준 code 1=성공, -1=조회실패, -2=인증실패, -5=프로시저실패(인증번호 불일치 등)
+    const item = Array.isArray(raw) ? (raw as Record<string, unknown>[])[0] : (raw as Record<string, unknown>);
+    const code = item?.code;
+    const codeNum = typeof code === "number" ? code : typeof code === "string" ? parseInt(code, 10) : NaN;
+    const msg = typeof item?.msg === "string" ? item.msg : undefined;
+    const successCode = code === 1 || code === "1" || codeNum === 1;
+    if (!successCode) {
+      const errorMessage =
+        msg ||
+        (codeNum === -5
+          ? "인증번호가 올바르지 않습니다."
+          : codeNum === -1
+            ? "조회에 실패했습니다."
+            : codeNum === -2
+              ? "인증 정보가 올바르지 않습니다."
+              : "긴급사용 요청에 실패했습니다.");
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", code, msg });
+      return { source: "api", success: false, error: errorMessage };
+    }
     await logger.write(LOG_CODES.UNLOCK_TRIGGERED, "INFO", { action: "emergency_use" });
     // 긴급사용 성공 시 잠금 해제 → 작동정보 화면으로 전환
     showTrayInfoInCurrentWindow();
-    return { source: "api", success: true, data };
+    return { source: "api", success: true, data: raw };
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", error: String(error) });
     return { source: "fallback", success: false, error: String(error) };
@@ -2057,6 +2129,8 @@ ipcMain.handle("pcoff:refreshMyAttendance", async () => {
         merged.pcOffYmdTime = lastWorkTimeData.pcOffYmdTime;
         merged.pcExCount = lastWorkTimeData.pcExCount;
         merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
+        // 서버 이석(screenType) 반영해 주기 잠금 검사에서 이석 감지되도록 lastWorkTimeData 갱신
+        lastWorkTimeData = { ...merged };
         await logger.write(LOG_CODES.TRAY_ATTENDANCE_REFRESHED, "INFO", {});
         return merged;
       }

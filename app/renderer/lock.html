@@ -6,16 +6,32 @@
     <title>5240 PcOff Agent - 잠금화면</title>
     <link rel="stylesheet" href="./styles.css" />
     <style>
+      /* CSS 미로드 시에도 문구가 보이도록 폴백 (하얀 화면 방지) */
       body {
+        margin: 0;
+        min-height: 100vh;
+        background: #111722;
+        color: #f5f7ff;
         user-select: none;
         -webkit-user-select: none;
+        font-family: "Segoe UI", "Apple SD Gothic Neo", sans-serif;
       }
       .lock-container {
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
+        padding: 28px;
       }
+      .fixed {
+        min-height: 200px;
+        border-radius: 24px;
+        background: rgba(10, 16, 27, 0.78);
+        border: 1px solid rgba(255,255,255,0.14);
+        padding: 28px;
+      }
+      #lock-title { margin: 0 0 10px; font-size: 1.5rem; }
+      #lock-info { color: #a9b3ca; margin: 0 0 20px; }
       /* 배경 이미지가 있을 때 .fixed 패널 투명도 0.2, 글자 가독성 보강 */
       body.has-lock-bg .fixed {
         background: rgba(10, 16, 27, 0.2);
@@ -196,5 +212,27 @@
     </div>
 
     <script type="module" src="./lock.js"></script>
+    <script>
+      window.addEventListener("error", function (e) {
+        var el = document.getElementById("lock-title");
+        if (el) {
+          el.textContent = "잠금화면 로드 중 오류가 발생했습니다.";
+          el.style.color = "#ef5f67";
+        }
+        var info = document.getElementById("lock-info");
+        if (info) {
+          info.textContent = (e.message || String(e)) + " (개발자 도구 콘솔 확인)";
+          info.style.color = "#a9b3ca";
+        }
+        console.error("[lock] renderer error", e);
+      });
+      var lockScript = document.querySelector('script[src="./lock.js"]');
+      if (lockScript) {
+        lockScript.addEventListener("error", function () {
+          document.body.innerHTML = "<div style=\"padding:28px;text-align:center;\"><h1 style=\"color:#ef5f67;\">lock.js를 불러올 수 없습니다</h1><p>styles.css 또는 lock.js 경로를 확인하세요.</p></div>";
+          console.error("[lock] lock.js failed to load");
+        });
+      }
+    </script>
   </body>
 </html>

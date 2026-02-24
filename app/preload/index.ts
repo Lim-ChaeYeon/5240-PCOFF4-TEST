@@ -109,6 +109,14 @@ const api = {
       data?: unknown;
       error?: string;
     }>,
+  /** FR-14: 이석 해제 비밀번호 검증 후 PC-ON (leaveSeatUnlockRequirePassword=true 시) */
+  requestPcOnWithLeaveSeatUnlock: (password: string, reason?: string) =>
+    ipcRenderer.invoke("pcoff:requestPcOnWithLeaveSeatUnlock", { password, reason }) as Promise<{
+      source: "api" | "mock" | "fallback";
+      success: boolean;
+      data?: unknown;
+      error?: string;
+    }>,
   hasLogin: () => ipcRenderer.invoke("pcoff:hasLogin") as Promise<{ hasLogin: boolean }>,
   getServareaInfo: (userMobileNo: string) =>
     ipcRenderer.invoke("pcoff:getServareaInfo", userMobileNo) as Promise<{

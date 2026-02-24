@@ -284,6 +284,29 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   win.on("closed", () => {
     mainWindow = null;
   });
+  // 잠금화면 중에는 ESC 등으로 전체 화면 해제 불가 — 즉시 다시 전체 화면
+  win.on("leave-full-screen", () => {
+    if (currentScreen === "lock" && !win.isDestroyed()) {
+      win.setFullScreen(true);
+    }
+  });
+  // 잠금화면 중 Cmd+Tab(앱 전환) 등으로 포커스가 빠지면 다시 맨 앞으로 가져옴
+  win.on("blur", () => {
+    if (currentScreen !== "lock" || win.isDestroyed()) return;
+    setTimeout(() => {
+      if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
+      app.focus({ steal: true });
+      setTimeout(() => {
+        if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
+        win.moveTop();
+        win.show();
+        win.setAlwaysOnTop(false);
+        win.setAlwaysOnTop(true, "screen-saver");
+        win.setFullScreen(true);
+        win.focus();
+      }, 50);
+    }, 100);
+  });
 }
 
 /** 창 포커스 시에도 핫키 동작하도록 before-input-event로 처리 (globalShortcut은 창 포커스 시 미동작할 수 있음) */
@@ -319,6 +342,9 @@ function showTrayInfoInCurrentWindow(): void {
     void createTrayInfoWindow();
     return;
   }
+  mainWindow.setFullScreen(false);
+  mainWindow.setAlwaysOnTop(false);
+  mainWindow.setVisibleOnAllWorkspaces(false);
   currentScreen = "tray-info";
   mainWindow.setSize(620, 840);
   mainWindow.setTitle("PCOFF 작동정보");
@@ -330,6 +356,12 @@ function showTrayInfoInCurrentWindow(): void {
     mainWindow.focus();
   }
   loadRendererInWindow(mainWindow, "main.html");
+  setImmediate(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "tray-info") {
+      mainWindow.setSize(620, 840);
+      mainWindow.focus();
+    }
+  });
 }
 
 /**
@@ -663,11 +695,19 @@ async function createLockWindow(): Promise<void> {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "lock";
-    mainWindow.setSize(1040, 720);
     mainWindow.setTitle("PCOFF 잠금화면");
+    mainWindow.setVisibleOnAllWorkspaces(true);
     loadRendererInWindow(mainWindow, "lock.html");
     mainWindow.show();
     mainWindow.focus();
+    mainWindow.setAlwaysOnTop(true, "screen-saver");
+    mainWindow.setFullScreen(true);
+    setImmediate(() => {
+      if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "lock") {
+        mainWindow.focus();
+        mainWindow.setAlwaysOnTop(true, "screen-saver");
+      }
+    });
     return;
   }
 
@@ -677,7 +717,7 @@ async function createLockWindow(): Promise<void> {
     resizable: false,
     minimizable: true,
     closable: false,
-
+    alwaysOnTop: true,
     fullscreenable: true,
     title: "PCOFF 잠금화면",
     webPreferences: {
@@ -690,7 +730,17 @@ async function createLockWindow(): Promise<void> {
   currentScreen = "lock";
   attachMainWindowCloseHandler(win);
   attachWindowHotkeys(win);
+  win.setVisibleOnAllWorkspaces(true);
   loadRendererInWindow(win, "lock.html");
+  win.show();
+  win.focus();
+  win.setFullScreen(true);
+  setImmediate(() => {
+    if (win && !win.isDestroyed() && currentScreen === "lock") {
+      win.focus();
+      win.setAlwaysOnTop(true, "screen-saver");
+    }
+  });
 }
 
 /** 같은 창에 잠금 화면 로드. 문구 데이터 선로드 후 로드 (핫키와 동일하게 호출 보장) */
@@ -718,11 +768,19 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   }
   mainWindow = win;
   currentScreen = "lock";
-  win.setSize(1040, 720);
   win.setTitle("PCOFF 잠금화면");
+  win.setVisibleOnAllWorkspaces(true);
   loadRendererInWindow(win, "lock.html");
   win.show();
   win.focus();
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setFullScreen(true);
+  setImmediate(() => {
+    if (win && !win.isDestroyed() && currentScreen === "lock") {
+      win.focus();
+      win.setAlwaysOnTop(true, "screen-saver");
+    }
+  });
 }
 
 /** 로컬 이석 감지(유휴/절전) 시 잠금화면 표시 */
@@ -761,12 +819,21 @@ async function doGlobalLogout(): Promise<void> {
  */
 function createLoginWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setFullScreen(false);
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setVisibleOnAllWorkspaces(false);
     currentScreen = "login";
     mainWindow.setSize(520, 620);
     mainWindow.setTitle("PCOFF 로그인");
     loadRendererInWindow(mainWindow, "index.html");
     mainWindow.show();
     mainWindow.focus();
+    setImmediate(() => {
+      if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "login") {
+        mainWindow.setSize(520, 620);
+        mainWindow.focus();
+      }
+    });
     return;
   }
 

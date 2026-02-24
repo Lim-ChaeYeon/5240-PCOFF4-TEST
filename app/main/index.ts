@@ -447,6 +447,37 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
   }>(join(baseDir, PATHS.config), {});
 
   let data = await api.getPcOffWorkTime();
+
+  // FR-14: 전용 정책 API (있으면 우선 병합. 서버 미구현 시 무시)
+  if (cachedUserServareaId) {
+    try {
+      const policy = await api.getLockPolicy(cachedUserServareaId);
+      if (policy?.lockScreen?.screens || policy?.unlockPolicy) {
+        const merged = { ...data } as Record<string, unknown>;
+        const screens = policy.lockScreen?.screens;
+        if (screens?.before) {
+          if (screens.before.title != null) merged.lockScreenBeforeTitle = screens.before.title;
+          if (screens.before.message != null) merged.lockScreenBeforeMessage = screens.before.message;
+        }
+        if (screens?.off) {
+          if (screens.off.title != null) merged.lockScreenOffTitle = screens.off.title;
+          if (screens.off.message != null) merged.lockScreenOffMessage = screens.off.message;
+        }
+        if (screens?.leave) {
+          if (screens.leave.title != null) merged.lockScreenLeaveTitle = screens.leave.title;
+          if (screens.leave.message != null) merged.lockScreenLeaveMessage = screens.leave.message;
+        }
+        if (policy.unlockPolicy?.leaveSeatUnlockRequirePassword !== undefined) {
+          merged.leaveSeatUnlockRequirePassword = policy.unlockPolicy.leaveSeatUnlockRequirePassword;
+        }
+        data = merged as WorkTimeResponse;
+        console.info("[PCOFF] 잠금화면 문구 — lock-policy API 적용됨");
+      }
+    } catch (e) {
+      console.info("[PCOFF] lock-policy API 미사용:", String(e));
+    }
+  }
+
   const hasLockScreenFromWorkTime =
     (data.lockScreenBeforeTitle ?? data.lockScreenOffTitle ?? data.lockScreenLeaveTitle) != null &&
     (String(data.lockScreenBeforeTitle ?? data.lockScreenOffTitle ?? data.lockScreenLeaveTitle).trim() !== "");
@@ -1731,6 +1762,64 @@ ipcMain.handle(
     } catch (error) {
       await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callCmmPcOnOffLogPrc", error: String(error) });
       return { source: "fallback", success: false, error: String(error) };
+    }
+  }
+);
+
+/** FR-14: 이석 해제 비밀번호 검증 후 PC-ON (leaveSeatUnlockRequirePassword=true 시) */
+ipcMain.handle(
+  "pcoff:requestPcOnWithLeaveSeatUnlock",
+  async (
+    _event,
+    payload: { password: string; reason?: string }
+  ): Promise<ActionResult> => {
+    const api = await getApiClient();
+    if (!api) return { source: "mock", success: false, error: "로그인 필요" };
+    try {
+      const verify = await api.verifyLeaveSeatUnlock(payload.password ?? "", payload.reason ?? "");
+      if (!verify.success) {
+        return { source: "api", success: false, error: verify.message ?? "비밀번호가 올바르지 않습니다." };
+      }
+      const data = await api.callCmmPcOnOffLogPrc({
+        tmckButnCd: "IN",
+        eventName: "Lock Off",
+        reason: payload.reason ?? "",
+        emergencyYn: "N"
+      });
+      await logger.write(LOG_CODES.LEAVE_SEAT_UNLOCK, "INFO", {
+        hasReason: Boolean(payload.reason?.trim()),
+        reason: payload.reason ?? "",
+        passwordVerified: true
+      });
+      if (payload.reason?.trim()) {
+        await logger.write(LOG_CODES.LEAVE_SEAT_REASON_SUBMITTED, "INFO", { reason: payload.reason });
+      }
+      if (localLeaveSeatDetectedAt) {
+        await logger.write(LOG_CODES.LEAVE_SEAT_RELEASED, "INFO", { reason: localLeaveSeatReason ?? "unknown" });
+        await leaveSeatReporter.reportEnd(payload.reason);
+        localLeaveSeatDetectedAt = null;
+        localLeaveSeatReason = null;
+      }
+      const fresh = await api.getPcOffWorkTime();
+      lastWorkTimeData = fresh as unknown as Record<string, unknown>;
+      applyResolvedScreenType(lastWorkTimeData);
+      lastWorkTimeFetchedAt = new Date().toISOString();
+      const pcOnT = parseYmdHm(fresh.pcOnYmdTime);
+      const pcOffT = parseYmdHm(fresh.pcOffYmdTime);
+      const now = new Date();
+      const locked =
+        pcOnT && pcOffT ? now < pcOnT || now >= pcOffT : (fresh.pcOnYn === "N");
+      if (!locked) {
+        showTrayInfoInCurrentWindow();
+        return { source: "api", success: true, data };
+      }
+      return { source: "api", success: true, data, stillLocked: true };
+    } catch (error) {
+      const errMsg = String(error);
+      if (errMsg.includes("404") || errMsg.includes("verifyLeaveSeatUnlock")) {
+        return { source: "api", success: false, error: "이석 해제 검증 API를 사용할 수 없습니다." };
+      }
+      return { source: "fallback", success: false, error: errMsg };
     }
   }
 );

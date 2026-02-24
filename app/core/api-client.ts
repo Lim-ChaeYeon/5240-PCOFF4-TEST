@@ -130,6 +130,33 @@ export interface WorkTimeResponse {
   lockScreenLeaveBackground?: string;
   /** 이석(leave/empty) 로고 이미지 URL */
   lockScreenLeaveLogo?: string;
+  /** FR-14: 이석 해제 시 비밀번호 입력 필요 여부 (전용 정책 API에서 설정) */
+  leaveSeatUnlockRequirePassword?: boolean;
+}
+
+/** FR-14: 전용 정책 API 응답 (GET /api/v1/pcoff/tenants/{tenantId}/lock-policy) */
+export interface TenantLockPolicy {
+  lockScreen?: {
+    screens?: {
+      before?: { title?: string; message?: string; imageAssetId?: string };
+      off?: { title?: string; message?: string; imageAssetId?: string };
+      leave?: { title?: string; message?: string; imageAssetId?: string };
+    };
+    logoAssetId?: string;
+  };
+  unlockPolicy?: {
+    emergencyUnlockEnabled?: boolean;
+    emergencyUnlockPassword?: {
+      minLength?: number;
+      requireComplexity?: boolean;
+      maxFailures?: number;
+      lockoutSeconds?: number;
+      expiresInDays?: number;
+    };
+    leaveSeatUnlockRequirePassword?: boolean;
+  };
+  version?: number;
+  publishedAt?: string;
 }
 
 /** 잠금화면 설정 조회 API 응답 항목 (getLockScreenInfo.send_data 요소) */
@@ -294,6 +321,42 @@ export class PcOffApiClient {
     });
     if (!res.ok) throw new Error(`${endpoint} failed: ${res.status}`);
     return (await res.json()) as unknown;
+  }
+
+  /** FR-14: GET 요청 (전용 정책 API 등) */
+  private async get(endpoint: string): Promise<unknown> {
+    const url = `${this.config.baseUrl.replace(/\/$/, "")}${endpoint}`;
+    const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`${endpoint} failed: ${res.status}`);
+    return (await res.json()) as unknown;
+  }
+
+  /**
+   * FR-14: 전용 정책 API — 잠금화면·이석해제 비밀번호 등 고객사 정책 조회.
+   * GET /api/v1/pcoff/tenants/{tenantId}/lock-policy
+   * 서버 미구현 시 404 등으로 실패하므로 호출부에서 try/catch 후 기존 getLockScreenInfo·config 병합 유지.
+   */
+  async getLockPolicy(tenantId: string): Promise<TenantLockPolicy | null> {
+    if (!tenantId?.trim()) return null;
+    const path = `/api/v1/pcoff/tenants/${encodeURIComponent(tenantId.trim())}/lock-policy`;
+    const raw = await this.get(path);
+    return (raw ?? null) as TenantLockPolicy | null;
+  }
+
+  /**
+   * FR-14: 이석 해제 비밀번호 검증 (leaveSeatUnlockRequirePassword=true 시 해제 전 호출).
+   * POST /verifyLeaveSeatUnlock.do — 서버 미구현 시 404 등으로 실패 가능.
+   */
+  async verifyLeaveSeatUnlock(password: string, reason?: string): Promise<{ success: boolean; message?: string }> {
+    const raw = await this.post("/verifyLeaveSeatUnlock.do", {
+      workYmd: this.config.workYmd,
+      userServareaId: this.config.userServareaId,
+      userStaffId: this.config.userStaffId,
+      password,
+      reason: reason ?? ""
+    });
+    const res = (Array.isArray(raw) ? raw[0] : raw) as { success?: boolean; message?: string } | undefined;
+    return { success: Boolean(res?.success), message: res?.message };
   }
 
   async getPcOffWorkTime(): Promise<WorkTimeResponse> {

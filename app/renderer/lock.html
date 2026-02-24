@@ -107,6 +107,20 @@
       </div>
     </div>
 
+    <!-- FR-14: 이석 해제 비밀번호 (leaveSeatUnlockRequirePassword=true 시) -->
+    <div id="leave-seat-unlock-modal" class="modal-overlay hidden" aria-label="이석 해제 비밀번호">
+      <div class="modal-box">
+        <h2 class="modal-title">이석 해제</h2>
+        <p class="modal-desc">비밀번호를 입력한 뒤 PC-ON 하세요.</p>
+        <input id="leave-seat-unlock-password" type="password" class="login-input modal-input" placeholder="비밀번호" maxlength="100" autocomplete="off" />
+        <input id="leave-seat-unlock-reason" type="text" class="login-input modal-input" placeholder="사유 (선택)" maxlength="200" style="margin-top:8px" />
+        <div class="modal-actions">
+          <button id="leave-seat-unlock-modal-cancel" class="button ghost">취소</button>
+          <button id="leave-seat-unlock-modal-confirm" class="button primary">PC-ON</button>
+        </div>
+      </div>
+    </div>
+
     <!-- FR-15: 긴급해제 모달 -->
     <div id="emergency-unlock-modal" class="modal-overlay hidden" aria-label="긴급해제">
       <div class="modal-box">

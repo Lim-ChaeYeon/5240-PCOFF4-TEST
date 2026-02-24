@@ -36,7 +36,8 @@ const DEFAULT_WORK = {
   leaveSeatOffInputMath: null,
   breakStartTime: null,
   breakEndTime: null,
-  leaveSeatTime: 5
+  leaveSeatTime: 5,
+  leaveSeatUnlockRequirePassword: false
 };
 
 function parseYmdHm(value) {
@@ -97,7 +98,8 @@ function coerceWorkTimeFromApi(data) {
     lockScreenOffBackground: data.lockScreenOffBackground ?? undefined,
     lockScreenOffLogo: data.lockScreenOffLogo ?? undefined,
     lockScreenLeaveBackground: data.lockScreenLeaveBackground ?? undefined,
-    lockScreenLeaveLogo: data.lockScreenLeaveLogo ?? undefined
+    lockScreenLeaveLogo: data.lockScreenLeaveLogo ?? undefined,
+    leaveSeatUnlockRequirePassword: Boolean(data.leaveSeatUnlockRequirePassword)
   };
 }
 
@@ -203,6 +205,55 @@ function showLeaveSeatReasonModal(work) {
     btnConfirm.addEventListener("click", onConfirm);
     overlay.addEventListener("click", onOverlayClick);
     input.addEventListener("keydown", onKeydown);
+  });
+}
+
+/**
+ * FR-14: 이석 해제 비밀번호 모달 (leaveSeatUnlockRequirePassword=true 시)
+ * @returns Promise<{ password: string; reason: string } | null> 확인 시 값, 취소 시 null
+ */
+function showLeaveSeatUnlockPasswordModal() {
+  const overlay = document.getElementById("leave-seat-unlock-modal");
+  const passwordInput = document.getElementById("leave-seat-unlock-password");
+  const reasonInput = document.getElementById("leave-seat-unlock-reason");
+  const btnCancel = document.getElementById("leave-seat-unlock-modal-cancel");
+  const btnConfirm = document.getElementById("leave-seat-unlock-modal-confirm");
+  if (!overlay || !passwordInput) return Promise.resolve(null);
+
+  passwordInput.value = "";
+  if (reasonInput) reasonInput.value = "";
+  overlay.classList.remove("hidden");
+  passwordInput.focus();
+
+  return new Promise((resolve) => {
+    const close = (value) => {
+      overlay.classList.add("hidden");
+      btnCancel?.removeEventListener("click", onCancel);
+      btnConfirm?.removeEventListener("click", onConfirm);
+      overlay.removeEventListener("click", onOverlayClick);
+      passwordInput.removeEventListener("keydown", onKeydown);
+      if (reasonInput) reasonInput.removeEventListener("keydown", onKeydown);
+      resolve(value);
+    };
+    const onCancel = () => close(null);
+    const onConfirm = () => {
+      const password = (passwordInput.value ?? "").trim();
+      if (!password) {
+        showToast("비밀번호를 입력해 주세요.");
+        return;
+      }
+      close({ password, reason: (reasonInput?.value ?? "").trim() });
+    };
+    const onOverlayClick = (e) => { if (e.target === overlay) close(null); };
+    const onKeydown = (e) => {
+      if (e.key === "Escape") close(null);
+      if (e.key === "Enter") onConfirm();
+    };
+    btnCancel?.addEventListener("click", onCancel);
+    btnConfirm?.addEventListener("click", onConfirm);
+    overlay.addEventListener("click", onOverlayClick);
+    passwordInput.addEventListener("keydown", onKeydown);
+    if (reasonInput) reasonInput.addEventListener("keydown", onKeydown);
   });
 }
 
@@ -795,6 +846,17 @@ async function bootstrap() {
   });
   btnPlayEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestPcOnOffLog) return showToast("preview 모드: PC-ON");
+
+    // FR-14: 이석 상태이고 비밀번호 필수인 경우 → 비밀번호 모달 후 검증 PC-ON
+    if (leaveSeatPolicy.isLeaveSeat && work.leaveSeatUnlockRequirePassword) {
+      if (!window.pcoffApi?.requestPcOnWithLeaveSeatUnlock) return showToast("preview 모드: 이석 해제");
+      const result = await showLeaveSeatUnlockPasswordModal();
+      if (!result) return;
+      await runAction("PC-ON (이석 해제)", () =>
+        window.pcoffApi.requestPcOnWithLeaveSeatUnlock(result.password, result.reason || undefined)
+      );
+      return;
+    }
 
     // 이석 상태이고 사유 입력이 필요한 경우 → 모달 표시
     if (leaveSeatPolicy.requireReason) {

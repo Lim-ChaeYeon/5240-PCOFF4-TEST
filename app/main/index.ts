@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, globalShortcut, protocol } from "electron";
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, shell, globalShortcut, protocol } from "electron";
 import type { LeaveSeatDetectedReason } from "../core/leave-seat-detector.js";
 import { LeaveSeatDetector } from "../core/leave-seat-detector.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -46,8 +46,10 @@ import { readJson } from "../core/storage.js";
 /** 개발 시: 프로젝트 디렉터리, 설치 앱: userData(설치 앱 전용 상태·로그 분리) */
 let baseDir = process.cwd();
 
-// 윈도우 관리: 모든 화면(작동정보·로그인·잠금)을 하나의 창에서 전환
+// 윈도우 관리: 메인 창(작동정보·로그인·잠금 시 주 디스플레이), 다중 디스플레이 시 보조 잠금창 (§7·§11)
 let mainWindow: BrowserWindow | null = null;
+/** 디스플레이당 잠금 전용 창 (주 디스플레이 제외). display.id → BrowserWindow */
+const lockWindowsByDisplayId = new Map<number, BrowserWindow>();
 let tray: Tray | null = null;
 
 // 현재 화면 상태 추적 (닫기 방지 정책 결정에 사용)
@@ -228,15 +230,18 @@ function getPreloadPath(): string | undefined {
 
 function getRendererPath(htmlFile: string): string {
   const appPath = app.getAppPath();
+  const cwd = process.cwd();
+  // 개발 시(npm run build && electron .): dist에서 실행되므로 build/ 또는 app/renderer/ 사용. build가 있으면 우선(동기화된 복사본).
   const candidates = app.isPackaged
     ? [
         join(appPath, "app/renderer", htmlFile),
+        join(appPath, "build", htmlFile),
         join(__dirname, `../../../app/renderer/${htmlFile}`)
       ]
     : [
+        join(cwd, "build", htmlFile),
         join(__dirname, `../../../app/renderer/${htmlFile}`),
-        join(process.cwd(), "app/renderer", htmlFile),
-        join(process.cwd(), "build", htmlFile),
+        join(cwd, "app/renderer", htmlFile),
         join(appPath, "app/renderer", htmlFile)
       ];
   for (const p of candidates) {
@@ -264,6 +269,23 @@ function loadRendererInWindow(win: BrowserWindow, htmlFile: string): Promise<voi
     console.error("[PCOFF] loadRendererInWindow failed:", htmlFile, pathOrUrl, err);
     throw err;
   });
+}
+
+/** main.html 로드 실패 시 재시도(흰 화면 방지) */
+function loadMainHtmlWithRetry(win: BrowserWindow, maxAttempts = 3): Promise<void> {
+  if (!win || win.isDestroyed()) return Promise.resolve();
+  const tryLoad = (attempt: number): Promise<void> => {
+    return loadRendererInWindow(win, "main.html").catch((err) => {
+      if (attempt >= maxAttempts) throw err;
+      const delay = attempt === 1 ? 250 : 500;
+      return new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          tryLoad(attempt + 1).then(resolve).catch(reject);
+        }, delay);
+      });
+    });
+  };
+  return tryLoad(1);
 }
 
 /**
@@ -318,6 +340,93 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   });
 }
 
+/** 보조 잠금창 전부 닫기 (해제/로그인 전환 시 호출) */
+function closeAllLockWindows(): void {
+  for (const win of lockWindowsByDisplayId.values()) {
+    if (!win.isDestroyed()) win.close();
+  }
+  lockWindowsByDisplayId.clear();
+}
+
+/** 잠금화면 동작 부착 (닫기 차단, leave-full-screen 시 재진입, blur 시 재포커스) — 보조 잠금창용 */
+function attachLockWindowBehavior(win: BrowserWindow): void {
+  win.on("close", (e) => {
+    if (!isForceQuit && currentScreen === "lock") e.preventDefault();
+  });
+  win.on("leave-full-screen", () => {
+    if (currentScreen === "lock" && !win.isDestroyed()) win.setFullScreen(true);
+  });
+  win.on("blur", () => {
+    if (currentScreen !== "lock" || win.isDestroyed()) return;
+    setTimeout(() => {
+      if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
+      app.focus({ steal: true });
+      setTimeout(() => {
+        if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
+        win.moveTop();
+        win.show();
+        win.setAlwaysOnTop(false);
+        win.setAlwaysOnTop(true, "screen-saver");
+        win.setFullScreen(true);
+        win.focus();
+      }, 50);
+    }, 100);
+  });
+}
+
+/** 다중 디스플레이: 주 디스플레이 제외 보조 디스플레이마다 잠금창 1개 생성·동기화 (§7·§11) */
+async function ensureLockWindowsForAllDisplays(): Promise<void> {
+  if (currentScreen !== "lock") return;
+  const displays = screen.getAllDisplays();
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const secondaries = displays.filter((d) => d.id !== primaryDisplay.id);
+
+  // 제거된 디스플레이에 해당하는 창 닫기
+  for (const [displayId, win] of lockWindowsByDisplayId.entries()) {
+    if (!secondaries.some((d) => d.id === displayId)) {
+      if (!win.isDestroyed()) win.close();
+      lockWindowsByDisplayId.delete(displayId);
+    }
+  }
+
+  for (const display of secondaries) {
+    if (lockWindowsByDisplayId.has(display.id)) {
+      const existing = lockWindowsByDisplayId.get(display.id)!;
+      if (existing.isDestroyed()) lockWindowsByDisplayId.delete(display.id);
+      else continue;
+    }
+    const win = new BrowserWindow({
+      width: display.bounds.width,
+      height: display.bounds.height,
+      x: display.bounds.x,
+      y: display.bounds.y,
+      fullscreenable: true,
+      resizable: false,
+      minimizable: true,
+      closable: false,
+      alwaysOnTop: true,
+      title: "PCOFF 잠금화면",
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: getPreloadPath()
+      }
+    });
+    win.setVisibleOnAllWorkspaces(true);
+    attachLockWindowBehavior(win);
+    win.on("closed", () => lockWindowsByDisplayId.delete(display.id));
+    await loadRendererInWindow(win, "lock.html").catch((err) => {
+      console.error("[PCOFF] 보조 잠금창 로드 실패:", display.id, err);
+    });
+    if (!win.isDestroyed() && currentScreen === "lock") {
+      win.setFullScreen(true);
+      win.setAlwaysOnTop(true, "screen-saver");
+      win.show();
+    }
+    lockWindowsByDisplayId.set(display.id, win);
+  }
+}
+
 /** 창 포커스 시에도 핫키 동작하도록 before-input-event로 처리 (globalShortcut은 창 포커스 시 미동작할 수 있음) */
 function attachWindowHotkeys(win: BrowserWindow): void {
   win.webContents.on("before-input-event", (event, input) => {
@@ -343,12 +452,22 @@ function attachWindowHotkeys(win: BrowserWindow): void {
 }
 
 /**
- * 현재 창을 작동정보(main.html)로 전환만 함. 잠금 검사 없음.
- * 임시연장/긴급사용 성공 직후 같은 창에서 에이전트 화면으로 돌아가기 위해 사용.
+ * 현재 창을 작동정보(main.html)로 전환. 잠금 검사 없음.
+ * macOS: 풀스크린 잠금창 재사용 시 setFullScreen(false)/setSize가 적용되지 않아
+ * 기존 창을 닫고 새 창(620×840)을 열어 에이전트 기본 크기로 표시.
+ * Windows: 같은 창에서 hide → 로드 → show(620×840).
  */
 function showTrayInfoInCurrentWindow(): void {
   if (isolationModeActive) return;
+  closeAllLockWindows();
   if (!mainWindow || mainWindow.isDestroyed()) {
+    void createTrayInfoWindow();
+    return;
+  }
+  if (process.platform === "darwin") {
+    const win = mainWindow;
+    currentScreen = "login";
+    win.destroy();
     void createTrayInfoWindow();
     return;
   }
@@ -358,19 +477,43 @@ function showTrayInfoInCurrentWindow(): void {
   currentScreen = "tray-info";
   mainWindow.setSize(620, 840);
   mainWindow.setTitle("PCOFF 작동정보");
-  mainWindow.show();
-  mainWindow.focus();
-  if (process.platform === "win32") {
-    mainWindow.setAlwaysOnTop(true);
-    mainWindow.setAlwaysOnTop(false);
-    mainWindow.focus();
-  }
-  loadRendererInWindow(mainWindow, "main.html");
-  setImmediate(() => {
-    if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "tray-info") {
-      mainWindow.setSize(620, 840);
-      mainWindow.focus();
+  mainWindow.hide();
+  mainWindow.setAlwaysOnTop(true);
+  mainWindow.setAlwaysOnTop(false);
+  const win = mainWindow;
+  const showWhenReady = () => {
+    if (win.isDestroyed() || currentScreen !== "tray-info") return;
+    win.setSize(620, 840);
+    win.center();
+    win.show();
+    win.focus();
+    if (process.platform === "win32") {
+      win.setAlwaysOnTop(true);
+      win.setAlwaysOnTop(false);
+      win.focus();
     }
+  };
+  setImmediate(() => {
+    if (!win || win.isDestroyed()) return;
+    void loadMainHtmlWithRetry(win).then(() => {
+      if (win.isDestroyed() || currentScreen !== "tray-info") return;
+      win.setSize(620, 840);
+      win.center();
+      setTimeout(() => {
+        if (win.isDestroyed() || currentScreen !== "tray-info") return;
+        win.webContents.executeJavaScript("document.body && document.querySelector('.dashboard') ? true : false").catch(() => false).then((hasContent) => {
+          if (hasContent === true) {
+            showWhenReady();
+          } else if (!win.isDestroyed() && currentScreen === "tray-info") {
+            loadMainHtmlWithRetry(win).then(() => showWhenReady()).catch(() => showWhenReady());
+          } else {
+            showWhenReady();
+          }
+        });
+      }, 200);
+    }).catch(() => {
+      showWhenReady();
+    });
   });
 }
 
@@ -392,7 +535,6 @@ async function createTrayInfoWindow(): Promise<void> {
     currentScreen = "tray-info";
     mainWindow.setSize(620, 840);
     mainWindow.setTitle("PCOFF 작동정보");
-    // Windows: 먼저 창을 보이게 한 뒤 로드해 트레이 클릭 시 바로 창이 보이도록
     mainWindow.show();
     mainWindow.focus();
     if (process.platform === "win32") {
@@ -400,7 +542,7 @@ async function createTrayInfoWindow(): Promise<void> {
       mainWindow.setAlwaysOnTop(false);
       mainWindow.focus();
     }
-    loadRendererInWindow(mainWindow, "main.html");
+    void loadMainHtmlWithRetry(mainWindow);
     return;
   }
 
@@ -432,7 +574,7 @@ async function createTrayInfoWindow(): Promise<void> {
       win.focus();
     }
   });
-  loadRendererInWindow(win, "main.html").catch((err) => {
+  loadMainHtmlWithRetry(win).catch((err) => {
     console.error("[PCOFF] Failed to load main.html:", err);
     win.show();
     win.focus();
@@ -707,6 +849,8 @@ async function createLockWindow(): Promise<void> {
     currentScreen = "lock";
     mainWindow.setTitle("PCOFF 잠금화면");
     mainWindow.setVisibleOnAllWorkspaces(true);
+    const primaryDisplay = screen.getPrimaryDisplay();
+    mainWindow.setBounds(primaryDisplay.bounds);
     await loadRendererInWindow(mainWindow, "lock.html").catch((err) => {
       console.error("[PCOFF] 잠금화면 로드 실패:", err);
     });
@@ -722,12 +866,16 @@ async function createLockWindow(): Promise<void> {
         mainWindow.setAlwaysOnTop(true, "screen-saver");
       }
     });
+    void ensureLockWindowsForAllDisplays();
     return;
   }
 
+  const primaryDisplay = screen.getPrimaryDisplay();
   const win = new BrowserWindow({
-    width: 1040,
-    height: 720,
+    width: primaryDisplay.bounds.width,
+    height: primaryDisplay.bounds.height,
+    x: primaryDisplay.bounds.x,
+    y: primaryDisplay.bounds.y,
     resizable: false,
     minimizable: true,
     closable: false,
@@ -764,6 +912,7 @@ async function createLockWindow(): Promise<void> {
       win.setAlwaysOnTop(true, "screen-saver");
     }
   });
+  void ensureLockWindowsForAllDisplays();
 }
 
 /** 같은 창에 잠금 화면 로드. 문구 데이터 선로드 후 로드 (핫키와 동일하게 호출 보장) */
@@ -793,6 +942,8 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   currentScreen = "lock";
   win.setTitle("PCOFF 잠금화면");
   win.setVisibleOnAllWorkspaces(true);
+  const primaryDisplay = screen.getPrimaryDisplay();
+  win.setBounds(primaryDisplay.bounds);
   await loadRendererInWindow(win, "lock.html").catch((err) => {
     console.error("[PCOFF] 잠금화면 로드 실패 (showLockInWindow):", err);
   });
@@ -808,6 +959,7 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
       win.setAlwaysOnTop(true, "screen-saver");
     }
   });
+  void ensureLockWindowsForAllDisplays();
 }
 
 /** 로컬 이석 감지(유휴/절전) 시 잠금화면 표시 */
@@ -845,6 +997,7 @@ async function doGlobalLogout(): Promise<void> {
  * 잠금화면과 같은 창(mainWindow) 재사용 — 로그인 후 잠금 시 같은 창에서 전환
  */
 function createLoginWindow(): void {
+  closeAllLockWindows();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setFullScreen(false);
     mainWindow.setAlwaysOnTop(false);
@@ -944,10 +1097,10 @@ function createTray(): void {
   updateTrayMenu();
 
   tray.on("click", () => {
-    createTrayInfoWindow();
+    showTrayInfoInCurrentWindow();
   });
   tray.on("double-click", () => {
-    createTrayInfoWindow();
+    showTrayInfoInCurrentWindow();
   });
 }
 
@@ -957,7 +1110,7 @@ function updateTrayMenu(): void {
   const contextMenu = Menu.buildFromTemplate([
     {
       label: "PCOFF 작동정보",
-      click: () => createTrayInfoWindow()
+      click: () => showTrayInfoInCurrentWindow()
     },
     {
       label: "잠금화면 열기",
@@ -1011,6 +1164,29 @@ function setOperationMode(mode: OperationMode): void {
   }
 }
 
+/** 서버에서 근태 조회 후 lastWorkTimeData·정책 갱신(긴급사용 완료 후 근태정보 반영용) */
+async function refreshWorkTimeFromApi(): Promise<void> {
+  const api = await getApiClient();
+  if (!api) return;
+  try {
+    const data = await api.getPcOffWorkTime();
+    lastWorkTimeData = data as unknown as Record<string, unknown>;
+    applyResolvedScreenType(lastWorkTimeData);
+    lastWorkTimeFetchedAt = new Date().toISOString();
+    leaveSeatDetector.updatePolicy({
+      leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
+      leaveSeatTimeMinutes: Number(data.leaveSeatTime ?? 0) || 0
+    });
+    emergencyUnlockManager?.updatePolicy({
+      unlockTimeMinutes: Number(data.emergencyUnlockTime ?? 0) || undefined,
+      maxFailures: Number(data.emergencyUnlockMaxFailures ?? 0) || undefined,
+      lockoutSeconds: Number(data.emergencyUnlockLockoutSeconds ?? 0) || undefined
+    });
+  } catch (e) {
+    console.info("[PCOFF] refreshWorkTimeFromApi 실패:", String(e));
+  }
+}
+
 /**
  * 서버 근태 기준 잠금 필요 여부.
  * 백엔드 정책: 잠금/잠금해제는 pcOnYmdTime(PC-ON 시각), pcOffYmdTime(PC-OFF 시각, 임시연장 반영) 두 값으로만 판단.
@@ -1023,6 +1199,38 @@ function setOperationMode(mode: OperationMode): void {
 async function isLockRequired(): Promise<boolean> {
   // FR-15: 긴급해제 활성 중이면 잠금 스킵
   if (emergencyUnlockManager?.isActive) return false;
+
+  // 긴급사용(EMERGENCY_USE) 중: 서버 근태 갱신 후, 긴급사용 종료 시각(emergencyEndDate)이 있으면 그 시각 전까지 잠금 스킵; 없으면 구간 동안 재잠금 안 함
+  if (currentMode === "EMERGENCY_USE") {
+    const api = await getApiClient();
+    if (api) {
+      try {
+        const data = await api.getPcOffWorkTime();
+        lastWorkTimeData = data as unknown as Record<string, unknown>;
+        applyResolvedScreenType(lastWorkTimeData);
+        lastWorkTimeFetchedAt = new Date().toISOString();
+        leaveSeatDetector.updatePolicy({
+          leaveSeatUseYn: normalizeLeaveSeatUseYn(data.leaveSeatUseYn),
+          leaveSeatTimeMinutes: Number(data.leaveSeatTime ?? 0) || 0
+        });
+        const endStr = String((lastWorkTimeData as Record<string, unknown>).emergencyEndDate ?? "").trim();
+        if (endStr && endStr !== "N" && endStr !== "null") {
+          const endTime = parseYmdHm(endStr);
+          if (endTime && new Date() < endTime) return false;
+          if (endTime && new Date() >= endTime) {
+            currentMode = "NORMAL";
+            void logger.write(LOG_CODES.TRAY_MODE_CHANGED, "INFO", { from: "EMERGENCY_USE", to: "NORMAL", reason: "emergencyEndDate_passed" });
+          }
+        } else {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
 
   // 이석(로컬 감지 또는 서버 screenType=empty)이면 무조건 잠금
   if (localLeaveSeatDetectedAt !== null) return true;
@@ -1393,7 +1601,7 @@ app.whenReady().then(async () => {
       }
     } else if (state === "ONLINE") {
       if (currentScreen === "lock" && !isolationModeActive) {
-        void createTrayInfoWindow();
+        showTrayInfoInCurrentWindow();
       }
     }
   });
@@ -1419,6 +1627,16 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("[PCOFF] Tray creation failed:", err);
   }
+
+  // §7·§11 다중 디스플레이: 핫플러그 시 보조 잠금창 동기화
+  screen.on("display-added", () => {
+    if (currentScreen === "lock") void ensureLockWindowsForAllDisplays();
+  });
+  screen.on("display-removed", (_event, display) => {
+    const win = lockWindowsByDisplayId.get(display.id);
+    if (win && !win.isDestroyed()) win.close();
+    lockWindowsByDisplayId.delete(display.id);
+  });
 
   // 개발자용 전역 핫키 — 강제로 등록. macOS: 손쉬운 사용 허용 필요, Windows: 앱 포커스 없어도 동작하도록 즉시+지연 재등록
   const hotkeys: [string, () => void][] = [
@@ -1515,7 +1733,7 @@ app.whenReady().then(async () => {
     });
 
     const lockOpened = await checkLockAndShowLockWindow();
-    if (!lockOpened) createTrayInfoWindow();
+    if (!lockOpened) showTrayInfoInCurrentWindow();
   } else {
     // 로그인 필요: 로그인 창 표시
     createLoginWindow();
@@ -1548,7 +1766,7 @@ app.on("activate", () => {
     mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
   if (!hasVisibleWindow) {
     if (isolationModeActive) void createLockWindow();
-    else createTrayInfoWindow();
+    else showTrayInfoInCurrentWindow();
   } else {
     mainWindow!.show();
     mainWindow!.focus();
@@ -1893,35 +2111,110 @@ ipcMain.handle("pcoff:requestPcExtend", async (_event, payload: { pcOffYmdTime?:
   }
 });
 
-ipcMain.handle("pcoff:requestEmergencyUse", async (_event, payload: { reason?: string; emergencyUsePass?: string }): Promise<ActionResult> => {
+/** 긴급사용 Step1: 사유만 전송 → 서버가 1회만 OTP 발급. 응답의 인증번호를 반환해 렌더러에서 비교용으로만 사용(API 1회 호출로 OTP 1개만 발송) */
+ipcMain.handle("pcoff:requestEmergencyUseStep1", async (_event, payload: { reason?: string }): Promise<{ success: boolean; serverPass?: string; error?: string }> => {
   const api = await getApiClient();
-  if (!api) return { source: "mock", success: true };
+  if (!api) {
+    return { success: false, error: "서버에 연결할 수 없습니다. 로그인 후 다시 시도해 주세요." };
+  }
   try {
     const raw = await api.callPcOffEmergencyUse({
-      emergencyUsePass: payload.emergencyUsePass ?? "",
+      emergencyUsePass: "",
       reason: payload.reason || "긴급사용 요청"
     });
-    // 서버 응답: 배열 [ { code, msg, ... } ]. KiwiBox JsonService 기준 code 1=성공, -1=조회실패, -2=인증실패, -5=프로시저실패(인증번호 불일치 등)
-    const item = Array.isArray(raw) ? (raw as Record<string, unknown>[])[0] : (raw as Record<string, unknown>);
-    const code = item?.code;
-    const codeNum = typeof code === "number" ? code : typeof code === "string" ? parseInt(code, 10) : NaN;
-    const msg = typeof item?.msg === "string" ? item.msg : undefined;
-    const successCode = code === 1 || code === "1" || codeNum === 1;
-    if (!successCode) {
+    const arr = Array.isArray(raw) ? raw : (raw && typeof raw === "object" && (Array.isArray((raw as Record<string, unknown>).data) || Array.isArray((raw as Record<string, unknown>).result)))
+      ? ((raw as Record<string, unknown>).data ?? (raw as Record<string, unknown>).result) as Record<string, unknown>[]
+      : null;
+    const item = arr && arr.length > 0 ? (arr[0] as Record<string, unknown>) : (raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null);
+    if (!item || typeof item !== "object") {
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", raw });
+      return { success: false, error: "서버 응답이 올바르지 않습니다." };
+    }
+    const code = item.code;
+    const codeNum = typeof code === "number" ? code : typeof code === "string" ? parseInt(String(code), 10) : NaN;
+    const msg = typeof item.msg === "string" ? item.msg : undefined;
+    if (codeNum !== 1) {
       const errorMessage =
         msg ||
-        (codeNum === -5
-          ? "인증번호가 올바르지 않습니다."
-          : codeNum === -1
-            ? "조회에 실패했습니다."
-            : codeNum === -2
-              ? "인증 정보가 올바르지 않습니다."
-              : "긴급사용 요청에 실패했습니다.");
-      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", code, msg });
+        (codeNum === -5 ? "인증번호가 올바르지 않습니다." : codeNum === -1 ? "조회에 실패했습니다." : codeNum === -2 ? "인증 정보가 올바르지 않습니다." : "긴급사용 요청에 실패했습니다.");
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", code, codeNum, msg });
+      return { success: false, error: errorMessage };
+    }
+    const serverPassRaw = item.emergencyUsePass ?? item.EmergencyUsePass ?? (item as Record<string, unknown>).emergency_use_pass;
+    const serverPass = String(serverPassRaw != null ? serverPassRaw : "").trim();
+    if (serverPass === "") {
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", reason: "서버 응답에 인증번호 없음" });
+      return { success: false, error: "서버에서 인증번호를 받지 못했습니다. 잠시 후 다시 시도해 주세요." };
+    }
+    return { success: true, serverPass };
+  } catch (error) {
+    await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", error: String(error) });
+    return { success: false, error: String(error) };
+  }
+});
+
+/** 긴급사용 Step2: 인증번호 일치 시 화면 전환만 수행(API 호출 없음) */
+ipcMain.handle("pcoff:completeEmergencyUse", async () => {
+  await logger.write(LOG_CODES.UNLOCK_TRIGGERED, "INFO", { action: "emergency_use" });
+  setOperationMode("EMERGENCY_USE");
+  await refreshWorkTimeFromApi();
+  showTrayInfoInCurrentWindow();
+});
+
+/** 긴급사용 Step2: 인증번호는 렌더러에서 이미 검증됨. API 재호출 없이 잠금 해제만 수행(재호출 시 서버가 OTP를 또 보내는 문제 방지) */
+ipcMain.handle("pcoff:completeEmergencyUseWithReason", async (_event, payload: { reason: string; emergencyUsePass: string }) => {
+  await logger.write(LOG_CODES.UNLOCK_TRIGGERED, "INFO", {
+    action: "emergency_use",
+    reason: (payload.reason ?? "").trim() || undefined
+  });
+  setOperationMode("EMERGENCY_USE");
+  await refreshWorkTimeFromApi();
+  showTrayInfoInCurrentWindow();
+  return { success: true };
+});
+
+ipcMain.handle("pcoff:requestEmergencyUse", async (_event, payload: { reason?: string; emergencyUsePass?: string }): Promise<ActionResult> => {
+  const api = await getApiClient();
+  if (!api) {
+    return { source: "mock", success: false, error: "서버에 연결할 수 없습니다. 로그인 후 다시 시도해 주세요." };
+  }
+  try {
+    const raw = await api.callPcOffEmergencyUse({
+      emergencyUsePass: "",
+      reason: payload.reason || "긴급사용 요청"
+    });
+    const arr = Array.isArray(raw) ? raw : (raw && typeof raw === "object" && (Array.isArray((raw as Record<string, unknown>).data) || Array.isArray((raw as Record<string, unknown>).result)))
+      ? ((raw as Record<string, unknown>).data ?? (raw as Record<string, unknown>).result) as Record<string, unknown>[]
+      : null;
+    const item = arr && arr.length > 0 ? (arr[0] as Record<string, unknown>) : (raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null);
+    if (!item || typeof item !== "object") {
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", raw });
+      return { source: "api", success: false, error: "서버 응답이 올바르지 않습니다." };
+    }
+    const code = item.code;
+    const codeNum = typeof code === "number" ? code : typeof code === "string" ? parseInt(String(code), 10) : NaN;
+    const msg = typeof item.msg === "string" ? item.msg : undefined;
+    if (codeNum !== 1) {
+      const errorMessage =
+        msg ||
+        (codeNum === -5 ? "인증번호가 올바르지 않습니다." : codeNum === -1 ? "조회에 실패했습니다." : codeNum === -2 ? "인증 정보가 올바르지 않습니다." : "긴급사용 요청에 실패했습니다.");
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", code, codeNum, msg });
       return { source: "api", success: false, error: errorMessage };
     }
+    const serverPassRaw = item.emergencyUsePass ?? item.EmergencyUsePass ?? (item as Record<string, unknown>).emergency_use_pass;
+    const serverPass = String(serverPassRaw != null ? serverPassRaw : "").trim();
+    const userPass = (payload.emergencyUsePass ?? "").trim();
+    if (serverPass === "" && userPass !== "") {
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", reason: "서버 응답에 인증번호 없음" });
+      return { source: "api", success: false, error: "서버에서 인증번호를 받지 못했습니다. 잠시 후 다시 시도해 주세요." };
+    }
+    if (userPass !== serverPass) {
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "callPcOffEmergencyUse", reason: "인증번호 불일치(클라이언트 검증)" });
+      return { source: "api", success: false, error: "입력하신 비밀번호가 맞지 않습니다. 다시 확인해 주세요." };
+    }
     await logger.write(LOG_CODES.UNLOCK_TRIGGERED, "INFO", { action: "emergency_use" });
-    // 긴급사용 성공 시 잠금 해제 → 작동정보 화면으로 전환
+    setOperationMode("EMERGENCY_USE");
+    await refreshWorkTimeFromApi();
     showTrayInfoInCurrentWindow();
     return { source: "api", success: true, data: raw };
   } catch (error) {
@@ -2219,7 +2512,8 @@ ipcMain.handle("pcoff:requestEmergencyUnlock", async (_event, payload: { passwor
   const result = await emergencyUnlockManager.attempt(api, payload.password, payload.reason);
   if (result.success) {
     setOperationMode("EMERGENCY_RELEASE");
-    void createTrayInfoWindow();
+    await refreshWorkTimeFromApi();
+    showTrayInfoInCurrentWindow();
   }
   return result;
 });

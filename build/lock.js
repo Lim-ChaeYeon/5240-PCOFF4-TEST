@@ -282,18 +282,37 @@ async function runAction(label, action) {
   }
 }
 
-function showEmergencyReasonModal() {
+/**
+ * 긴급사용 모달. serverPass가 있으면 이미 OTP 발송된 상태 → 인증번호 입력 + 사유 입력 후 확인 시 검증·사유 전송만.
+ * @param {string|null} serverPass - Step1에서 받은 인증번호(있으면 모달만 검증·사유 전송, 없으면 사용 안 함)
+ */
+function showEmergencyReasonModal(serverPass) {
   const overlay = document.getElementById("emergency-modal");
   const passInput = document.getElementById("emergency-pass-input");
   const reasonInput = document.getElementById("emergency-reason-input");
+  const descEl = document.querySelector("#emergency-modal .modal-desc");
+  const errorEl = document.getElementById("emergency-modal-error");
   const btnCancel = document.getElementById("emergency-modal-cancel");
   const btnConfirm = document.getElementById("emergency-modal-confirm");
   if (!overlay || !passInput || !reasonInput) return Promise.resolve(null);
 
   passInput.value = "";
   reasonInput.value = "긴급 업무 처리";
+  if (descEl) descEl.textContent = "휴대폰으로 수신된 인증번호를 입력한 뒤, 사유를 입력하고 확인을 눌러 주세요.";
+  if (errorEl) {
+    errorEl.textContent = "";
+    errorEl.style.display = "none";
+  }
   overlay.classList.remove("hidden");
   passInput.focus();
+
+  const storedServerPass = serverPass != null ? String(serverPass).trim() : null;
+  if (!storedServerPass) {
+    if (errorEl) {
+      errorEl.textContent = "인증번호를 불러오지 못했습니다. 긴급사용 버튼을 다시 눌러 주세요.";
+      errorEl.style.display = "";
+    }
+  }
 
   return new Promise((resolve) => {
     const close = (value) => {
@@ -306,20 +325,53 @@ function showEmergencyReasonModal() {
       resolve(value);
     };
     const onCancel = () => close(null);
-    const onConfirm = () => {
-      const pass = (passInput.value ?? "").trim();
+    const showError = (msg) => {
+      if (errorEl) {
+        errorEl.textContent = msg || "인증번호가 올바르지 않습니다.";
+        errorEl.style.display = "";
+      }
+      passInput.value = "";
+      passInput.focus();
+    };
+    const onConfirm = async () => {
       const reason = (reasonInput.value ?? "").trim();
+      const pass = (passInput.value ?? "").trim();
+
+      if (!storedServerPass) return;
+
       if (!pass) {
         showToast("인증번호를 입력해 주세요.");
         passInput.focus();
         return;
       }
-      if (!reason) {
-        showToast("긴급사용 사유를 입력해 주세요.");
-        reasonInput.focus();
+      if (String(pass).trim() !== String(storedServerPass).trim()) {
+        showError("입력하신 비밀번호가 맞지 않습니다. 다시 확인해 주세요.");
         return;
       }
-      close({ reason, emergencyUsePass: pass });
+
+      if (!window.pcoffApi?.completeEmergencyUseWithReason) {
+        showToast("preview 모드: 긴급사용");
+        return;
+      }
+      btnConfirm.disabled = true;
+      if (errorEl) {
+        errorEl.textContent = "";
+        errorEl.style.display = "none";
+      }
+      try {
+        const result = await window.pcoffApi.completeEmergencyUseWithReason(reason || "긴급사용", pass);
+        if (result?.success) {
+          close({ success: true });
+          showToast("긴급사용 완료");
+        } else {
+          showError(result?.error || "사유 전송에 실패했습니다.");
+        }
+      } catch (e) {
+        showError("처리 중 오류가 발생했습니다.");
+        console.error(e);
+      } finally {
+        btnConfirm.disabled = false;
+      }
     };
     const onOverlayClick = (e) => {
       if (e.target === overlay) close(null);
@@ -841,10 +893,24 @@ async function bootstrap() {
     await runAction("임시연장", () => window.pcoffApi.requestPcExtend(work.pcOffYmdTime));
   });
   btnUseEl?.addEventListener("click", async () => {
-    if (!window.pcoffApi?.requestEmergencyUse) return showToast("preview 모드: 긴급사용");
-    const result = await showEmergencyReasonModal();
-    if (!result) return;
-    await runAction("긴급사용", () => window.pcoffApi.requestEmergencyUse(result.reason, result.emergencyUsePass));
+    if (!window.pcoffApi?.requestEmergencyUseStep1) {
+      showToast("preview 모드: 긴급사용");
+      return;
+    }
+    btnUseEl.disabled = true;
+    try {
+      const result = await window.pcoffApi.requestEmergencyUseStep1("긴급사용 요청");
+      if (result?.success && result?.serverPass != null) {
+        await showEmergencyReasonModal(result.serverPass);
+      } else {
+        showToast(result?.error || "인증번호 발송에 실패했습니다.");
+      }
+    } catch (e) {
+      showToast("인증번호 발송 중 오류가 발생했습니다.");
+      console.error(e);
+    } finally {
+      btnUseEl.disabled = false;
+    }
   });
   btnPlayEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestPcOnOffLog) return showToast("preview 모드: PC-ON");

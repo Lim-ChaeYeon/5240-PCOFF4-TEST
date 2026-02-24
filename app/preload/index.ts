@@ -102,6 +102,11 @@ const api = {
       data?: unknown;
       error?: string;
     }>,
+  requestEmergencyUseStep1: (reason: string) =>
+    ipcRenderer.invoke("pcoff:requestEmergencyUseStep1", { reason }) as Promise<{ success: boolean; serverPass?: string; error?: string }>,
+  completeEmergencyUse: () => ipcRenderer.invoke("pcoff:completeEmergencyUse") as Promise<void>,
+  completeEmergencyUseWithReason: (reason: string, emergencyUsePass: string) =>
+    ipcRenderer.invoke("pcoff:completeEmergencyUseWithReason", { reason, emergencyUsePass }) as Promise<{ success: boolean; error?: string }>,
   requestPcOnOffLog: (tmckButnCd: "IN" | "OUT", eventName: string, reason = "", isLeaveSeat = false) =>
     ipcRenderer.invoke("pcoff:requestPcOnOffLog", { tmckButnCd, eventName, reason, isLeaveSeat }) as Promise<{
       source: "api" | "mock" | "fallback";

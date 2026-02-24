@@ -485,7 +485,7 @@ export class PcOffApiClient {
     return this.post("/callPcOffEmergencyUse.do", payload);
   }
 
-  /** FR-15: 긴급해제 — 비밀번호 검증 후 잠금 해제 */
+  /** FR-15: 긴급해제 — 비밀번호 검증 후 잠금 해제. 성공은 code === 1일 때만 인정(서버 응답 code 기준) */
   async callPcOffEmergencyUnlock(request: EmergencyUnlockRequest): Promise<EmergencyUnlockResponse> {
     const raw = await this.post("/callPcOffEmergencyUnlock.do", {
       workYmd: this.config.workYmd,
@@ -494,8 +494,20 @@ export class PcOffApiClient {
       password: request.password,
       reason: request.reason ?? ""
     });
-    if (Array.isArray(raw)) return (raw[0] ?? { success: false }) as EmergencyUnlockResponse;
-    return (raw ?? { success: false }) as EmergencyUnlockResponse;
+    const arr = Array.isArray(raw) ? raw : (raw && typeof raw === "object" && (Array.isArray((raw as Record<string, unknown>).data) || Array.isArray((raw as Record<string, unknown>).result)))
+      ? ((raw as Record<string, unknown>).data ?? (raw as Record<string, unknown>).result) as Record<string, unknown>[]
+      : null;
+    const item = (arr && arr.length > 0 ? arr[0] : (raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {})) as Record<string, unknown>;
+    const code = item?.code;
+    const codeNum = typeof code === "number" ? code : typeof code === "string" ? parseInt(String(code), 10) : NaN;
+    const success = codeNum === 1;
+    const msg = typeof item?.msg === "string" ? item.msg : typeof item?.message === "string" ? item.message : undefined;
+    return {
+      success,
+      message: msg,
+      remainingAttempts: typeof item?.remainingAttempts === "number" ? item.remainingAttempts : undefined,
+      lockoutUntil: typeof item?.lockoutUntil === "string" ? item.lockoutUntil : undefined
+    };
   }
 }
 

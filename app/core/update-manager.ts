@@ -29,6 +29,17 @@ export interface UpdateStatus {
 const MAX_RETRY_COUNT = 3;
 const RETRY_DELAY_MS = 60_000; // 1분 후 재시도
 
+/** 404 / 플랫폼용 메타파일 없음 — 재시도하지 않고 '업데이트 없음'으로 처리 */
+function isUpdateNotFoundError(message: string): boolean {
+  const m = String(message);
+  return (
+    m.includes("404") ||
+    m.includes("Cannot find latest-mac.yml") ||
+    m.includes("Cannot find latest.yml") ||
+    /latest-[a-z0-9-]+\.yml/.test(m)
+  );
+}
+
 // 개발 모드에서 프로젝트 루트 package.json 경로 (dist/app/core → 프로젝트 루트)
 const getProjectRootPackagePath = (): string => {
   const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -74,67 +85,100 @@ export class UpdateManager {
       this.autoUpdater = autoUpdater;
       console.info("[UpdateManager] current version:", this.appVersion);
 
+      // GitHub Release 다운로드 시 CDN/리다이렉트에서 차단되지 않도록 User-Agent 설정 (퍼블릭 저장소 404 완화)
+      const ua = `5240-PcOff-Agent/${this.appVersion} (${process.platform}; Electron)`;
+      (autoUpdater as { requestHeaders?: Record<string, string> }).requestHeaders = {
+        "User-Agent": ua,
+        Accept: "application/octet-stream",
+      };
+
       // 자동 다운로드 활성화 (무확인 자동 적용)
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
 
       // 이벤트 리스너 설정
       autoUpdater.on("checking-for-update", () => {
-        this.status = { state: "checking" };
-        console.info("[UpdateManager] checking for update...");
-        this.sendStatusToRenderer();
+        try {
+          this.status = { state: "checking" };
+          console.info("[UpdateManager] checking for update...");
+          this.sendStatusToRenderer();
+        } catch (e) {
+          console.warn("[UpdateManager] checking-for-update handler:", e);
+        }
       });
 
       autoUpdater.on("update-available", (info) => {
-        this.status = { state: "available", version: info.version };
-        console.info("[UpdateManager] update available:", info.version);
-        this.logger.write(LOG_CODES.UPDATE_FOUND, "INFO", {
-          version: info.version,
-        });
-        this.sendStatusToRenderer();
+        try {
+          this.status = { state: "available", version: info.version };
+          console.info("[UpdateManager] update available:", info.version);
+          this.logger.write(LOG_CODES.UPDATE_FOUND, "INFO", { version: info.version }).catch(() => {});
+          this.sendStatusToRenderer();
+        } catch (e) {
+          console.warn("[UpdateManager] update-available handler:", e);
+          this.sendStatusToRenderer();
+        }
       });
 
       autoUpdater.on("update-not-available", (info) => {
-        this.status = { state: "not-available" };
-        console.info("[UpdateManager] update not available (current:", this.appVersion + ", info:", String((info as { version?: string })?.version ?? "—") + ")");
-        this.sendStatusToRenderer();
+        try {
+          this.status = { state: "not-available" };
+          console.info("[UpdateManager] update not available (current:", this.appVersion + ", info:", String((info as { version?: string })?.version ?? "—") + ")");
+          this.sendStatusToRenderer();
+        } catch (e) {
+          console.warn("[UpdateManager] update-not-available handler:", e);
+        }
       });
 
       autoUpdater.on("download-progress", (progress) => {
-        this.status = {
-          state: "downloading",
-          progress: Math.round(progress.percent),
-        };
-        this.sendStatusToRenderer();
+        try {
+          this.status = {
+            state: "downloading",
+            progress: Math.round(progress.percent),
+          };
+          this.sendStatusToRenderer();
+        } catch (e) {
+          console.warn("[UpdateManager] download-progress handler:", e);
+        }
       });
 
       autoUpdater.on("update-downloaded", (info) => {
-        this.status = { state: "downloaded", version: info.version };
-        this.logger.write(LOG_CODES.UPDATE_DOWNLOADED, "INFO", {
-          version: info.version,
-        });
-        this.sendStatusToRenderer();
-
-        // 무확인 자동 설치 - 다운로드 완료 후 즉시 적용
-        // quitAndInstall은 앱을 재시작하므로, 실제 운영에서는 적절한 타이밍에 호출
-        // 현재는 자동 적용 (앱 종료 시 설치됨)
-        this.logger.write(LOG_CODES.UPDATE_APPLIED, "INFO", {
-          version: info.version,
-          autoInstall: true,
-        });
+        try {
+          this.status = { state: "downloaded", version: info.version };
+          this.logger.write(LOG_CODES.UPDATE_DOWNLOADED, "INFO", { version: info.version }).catch(() => {});
+          this.sendStatusToRenderer();
+          this.logger.write(LOG_CODES.UPDATE_APPLIED, "INFO", {
+            version: info.version,
+            autoInstall: true,
+          }).catch(() => {});
+        } catch (e) {
+          console.warn("[UpdateManager] update-downloaded handler:", e);
+          this.sendStatusToRenderer();
+        }
       });
 
       autoUpdater.on("error", async (error) => {
-        const errorMessage = error?.message || String(error);
-        this.status = { state: "error", error: errorMessage };
-        console.warn("[UpdateManager] error:", errorMessage, error);
-        this.logger.write(LOG_CODES.UPDATE_FAILED, "WARN", {
-          error: errorMessage,
-        });
-        this.sendStatusToRenderer();
-
-        // 재시도 큐에 추가
-        await this.enqueueRetry("latest", errorMessage);
+        try {
+          const errorMessage = error?.message || String(error);
+          if (isUpdateNotFoundError(errorMessage)) {
+            this.status = { state: "not-available", error: "이 플랫폼용 업데이트 정보가 없습니다." };
+            console.info("[UpdateManager] update not found (404/platform):", errorMessage);
+            this.sendStatusToRenderer();
+            return;
+          }
+          this.status = { state: "error", error: errorMessage };
+          console.warn("[UpdateManager] error:", errorMessage, error);
+          this.logger.write(LOG_CODES.UPDATE_FAILED, "WARN", { error: errorMessage }).catch(() => {});
+          this.sendStatusToRenderer();
+          try {
+            await this.enqueueRetry("latest", errorMessage);
+          } catch (e) {
+            console.warn("[UpdateManager] enqueueRetry failed:", e);
+          }
+        } catch (e) {
+          console.warn("[UpdateManager] error handler failed:", e);
+          this.status = { state: "not-available" };
+          this.sendStatusToRenderer();
+        }
       });
     } catch (error) {
       // electron-updater 로드 실패 (시뮬레이터 등 비-Electron 환경)
@@ -144,19 +188,26 @@ export class UpdateManager {
 
   private sendStatusToRenderer(): void {
     if (!isElectronRuntime()) return;
-
-    import("electron")
-      .then(({ BrowserWindow }) => {
-        const windows = BrowserWindow.getAllWindows();
-        for (const win of windows) {
-          if (!win.isDestroyed()) {
-            win.webContents.send("pcoff:update-progress", this.status);
+    try {
+      import("electron")
+        .then(({ BrowserWindow }) => {
+          try {
+            const windows = BrowserWindow.getAllWindows();
+            for (const win of windows) {
+              if (!win.isDestroyed()) {
+                win.webContents.send("pcoff:update-progress", this.status);
+              }
+            }
+          } catch (e) {
+            console.warn("[UpdateManager] sendStatusToRenderer:", e);
           }
-        }
-      })
-      .catch(() => {
-        // Electron 모듈 로드 실패 무시
-      });
+        })
+        .catch(() => {
+          // Electron 모듈 로드 실패 무시
+        });
+    } catch (e) {
+      console.warn("[UpdateManager] sendStatusToRenderer sync:", e);
+    }
   }
 
   /**
@@ -185,9 +236,18 @@ export class UpdateManager {
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
+        if (isUpdateNotFoundError(errorMessage)) {
+          this.status = { state: "not-available", error: "이 플랫폼용 업데이트 정보가 없습니다." };
+          this.sendStatusToRenderer();
+          return this.status;
+        }
         this.status = { state: "error", error: errorMessage };
         this.sendStatusToRenderer();
-        await this.enqueueRetry("latest", errorMessage);
+        try {
+          await this.enqueueRetry("latest", errorMessage);
+        } catch (e) {
+          console.warn("[UpdateManager] enqueueRetry failed:", e);
+        }
         return this.status;
       }
     }

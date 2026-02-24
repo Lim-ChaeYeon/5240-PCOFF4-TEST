@@ -16,6 +16,30 @@
         align-items: center;
         justify-content: center;
       }
+      /* 배경 이미지가 있을 때 .fixed 패널 투명도 0.2, 글자 가독성 보강 */
+      body.has-lock-bg .fixed {
+        background: rgba(10, 16, 27, 0.2);
+        backdrop-filter: blur(6px);
+      }
+      body.has-lock-bg .fixed .title,
+      body.has-lock-bg .fixed .info,
+      body.has-lock-bg .fixed .user-display,
+      body.has-lock-bg .fixed .logo-text-wrap strong,
+      body.has-lock-bg .fixed .logo-text-wrap span,
+      body.has-lock-bg .fixed .state-badge,
+      body.has-lock-bg .fixed .version-badge,
+      body.has-lock-bg .fixed .time-box span,
+      body.has-lock-bg .fixed .time-box strong,
+      body.has-lock-bg .fixed #date-text,
+      body.has-lock-bg .fixed #time-text,
+      body.has-lock-bg .fixed .action-link {
+        color: #1a1f2e;
+        text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9), 0 0 8px rgba(255, 255, 255, 0.6);
+      }
+      body.has-lock-bg .fixed .action-link {
+        border-color: rgba(26, 31, 46, 0.5);
+        background: rgba(255, 255, 255, 0.25);
+      }
     </style>
   </head>
   <body>

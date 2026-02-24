@@ -414,10 +414,12 @@ function applyLockScreenImages(work) {
       document.body.style.backgroundImage = `url(${CSS.escape(backgroundUrl.trim())})`;
       document.body.style.backgroundSize = "cover";
       document.body.style.backgroundPosition = "center";
+      document.body.classList.add("has-lock-bg");
     } else {
       document.body.style.backgroundImage = "";
       document.body.style.backgroundSize = "";
       document.body.style.backgroundPosition = "";
+      document.body.classList.remove("has-lock-bg");
     }
   }
   const logoImg = document.getElementById("lock-logo-img");

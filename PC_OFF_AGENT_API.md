@@ -9,6 +9,11 @@
 **Base URL:** `https://api.5240.cloud`  
 **공통:** 모든 API는 `HTTPS/POST`, Request/Response `type:json`(JSON).
 
+**백엔드 참고:** 실제 서버 구현은 **KiwiBox JsonController**를 참고한다.  
+`works2/source/kiwibox/src/main/java/kiwibox/SYS/API/json/JsonController.java`  
+— 엔드포인트·요청/응답 형태 확인, 배열 요청/배열 응답 규칙 검증, 한글 처리 정책(URLDecoder 등) 참고용. API 추가·변경 시 위 문서와 함께 위 컨트롤러를 보면 된다.  
+**현재 서버에 없는 API:** `verifyLeaveSeatUnlock.do`, `getLockScreenInfo.do`, `GET /api/v1/pcoff/tenants/{tenantId}/lock-policy` — JsonController 및 다른 컨트롤러에도 **실제로 없음**. 에이전트는 호출부만 구현해 두었으며, 서버 측 신규 구현 후 연동·테스트 필요.
+
 ---
 
 ## 0. 공통 규칙

@@ -134,29 +134,28 @@ export class UpdateManager {
         }
       });
 
-      autoUpdater.on("download-progress", (progress) => {
+      autoUpdater.on("download-progress", (progress: { percent?: number }) => {
         try {
-          this.status = {
-            state: "downloading",
-            progress: Math.round(progress.percent),
-          };
+          const percent = progress != null && typeof progress.percent === "number" ? progress.percent : 0;
+          this.status = { state: "downloading", progress: Math.round(percent) };
           this.sendStatusToRenderer();
         } catch (e) {
           console.warn("[UpdateManager] download-progress handler:", e);
+          this.status = { state: "error", error: String(e) };
+          this.sendStatusToRenderer();
         }
       });
 
-      autoUpdater.on("update-downloaded", (info) => {
+      autoUpdater.on("update-downloaded", (info: { version?: string }) => {
         try {
-          this.status = { state: "downloaded", version: info.version };
-          this.logger.write(LOG_CODES.UPDATE_DOWNLOADED, "INFO", { version: info.version }).catch(() => {});
+          const version = info?.version ?? "?";
+          this.status = { state: "downloaded", version };
+          this.logger.write(LOG_CODES.UPDATE_DOWNLOADED, "INFO", { version }).catch(() => {});
           this.sendStatusToRenderer();
-          this.logger.write(LOG_CODES.UPDATE_APPLIED, "INFO", {
-            version: info.version,
-            autoInstall: true,
-          }).catch(() => {});
+          // UPDATE_APPLIED는 사용자가 '지금 재시작' 후 실제 설치 시 로깅
         } catch (e) {
           console.warn("[UpdateManager] update-downloaded handler:", e);
+          this.status = { state: "error", error: String(e) };
           this.sendStatusToRenderer();
         }
       });
@@ -194,21 +193,22 @@ export class UpdateManager {
   private sendStatusToRenderer(): void {
     if (!isElectronRuntime()) return;
     try {
+      const payload = { ...this.status };
       import("electron")
         .then(({ BrowserWindow }) => {
           try {
             const windows = BrowserWindow.getAllWindows();
             for (const win of windows) {
               if (!win.isDestroyed()) {
-                win.webContents.send("pcoff:update-progress", this.status);
+                win.webContents.send("pcoff:update-progress", payload);
               }
             }
           } catch (e) {
             console.warn("[UpdateManager] sendStatusToRenderer:", e);
           }
         })
-        .catch(() => {
-          // Electron 모듈 로드 실패 무시
+        .catch((e) => {
+          console.warn("[UpdateManager] sendStatusToRenderer load:", e);
         });
     } catch (e) {
       console.warn("[UpdateManager] sendStatusToRenderer sync:", e);

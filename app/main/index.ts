@@ -1410,6 +1410,12 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", async (e) => {
+  // 다운로드 중/대기 중에는 의도치 않은 종료 방지 (다운로드 완료 후 '지금 재시작'으로 적용)
+  const updateStatus = updater.getStatus();
+  if (updateStatus.state === "downloading" || updateStatus.state === "available") {
+    e.preventDefault();
+    return;
+  }
   // 다운로드된 업데이트가 있으면 종료 시 설치 실행 (autoInstallOnAppQuit만으로는 미동작할 수 있음)
   if (updater.quitAndInstallIfDownloaded()) return;
 

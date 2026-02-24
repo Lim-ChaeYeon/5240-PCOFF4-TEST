@@ -1038,27 +1038,48 @@ app.whenReady().then(async () => {
     const userConfigPath = join(baseDir, "config.json");
     const bundledConfigPath = join(process.resourcesPath, "config.json");
     if (!existsSync(userConfigPath) && existsSync(bundledConfigPath)) {
-      // 첫 실행: 번들에서 apiBaseUrl만 가져옴
+      // 첫 실행: 번들에서 apiBaseUrl + 잠금화면 설정(lockScreen, lockScreenApiUrl) 복사. 로그인 정보는 제외.
       try {
         mkdirSync(baseDir, { recursive: true });
         const raw = readFileSync(bundledConfigPath, "utf-8");
         const bundled = JSON.parse(raw) as Record<string, unknown>;
         const safeConfig: Record<string, unknown> = {};
         if (bundled.apiBaseUrl) safeConfig.apiBaseUrl = bundled.apiBaseUrl;
+        if (bundled.lockScreenApiUrl != null) safeConfig.lockScreenApiUrl = bundled.lockScreenApiUrl;
+        if (bundled.lockScreen != null && typeof bundled.lockScreen === "object" && !Array.isArray(bundled.lockScreen)) {
+          safeConfig.lockScreen = bundled.lockScreen;
+        }
         writeFileSync(userConfigPath, JSON.stringify(safeConfig, null, 2), "utf-8");
-        console.info("[PCOFF] config.json created in userData (apiBaseUrl only)");
+        console.info("[PCOFF] config.json created in userData (apiBaseUrl, lockScreen, lockScreenApiUrl)");
       } catch (e) {
         console.warn("[PCOFF] Failed to create config from bundle:", e);
       }
     } else if (existsSync(userConfigPath)) {
-      // 기존 설치: config.json에 로그인 정보가 남아 있으면 제거 (마이그레이션)
+      // 기존 설치: 로그인 정보 제거(마이그레이션) + 잠금화면 설정 없으면 번들에서 보강
       try {
         const raw = readFileSync(userConfigPath, "utf-8");
         const cfg = JSON.parse(raw) as Record<string, unknown>;
+        let changed = false;
         if (cfg.userServareaId || cfg.userStaffId) {
           const { userServareaId: _a, userStaffId: _b, ...clean } = cfg;
-          writeFileSync(userConfigPath, JSON.stringify(clean, null, 2), "utf-8");
-          console.info("[PCOFF] config.json: stale login fields removed (migration)");
+          Object.assign(cfg, clean);
+          changed = true;
+        }
+        const bundledConfigPath = join(process.resourcesPath, "config.json");
+        if (existsSync(bundledConfigPath)) {
+          const bundled = JSON.parse(readFileSync(bundledConfigPath, "utf-8")) as Record<string, unknown>;
+          if (cfg.lockScreen == null && bundled.lockScreen != null && typeof bundled.lockScreen === "object" && !Array.isArray(bundled.lockScreen)) {
+            cfg.lockScreen = bundled.lockScreen;
+            changed = true;
+          }
+          if (cfg.lockScreenApiUrl == null && bundled.lockScreenApiUrl != null) {
+            cfg.lockScreenApiUrl = bundled.lockScreenApiUrl;
+            changed = true;
+          }
+        }
+        if (changed) {
+          writeFileSync(userConfigPath, JSON.stringify(cfg, null, 2), "utf-8");
+          console.info("[PCOFF] config.json: migration applied (login fields removed and/or lockScreen from bundle)");
         }
       } catch { /* ignore parse errors */ }
     }

@@ -24,7 +24,7 @@ import { OfflineManager, type ConnectivityState } from "../core/offline-manager.
 import { EmergencyUnlockManager } from "../core/emergency-unlock.js";
 import { AuthPolicy } from "../core/auth-policy.js";
 import { AgentGuard } from "../core/agent-guard.js";
-import { PcOffApiClient, PcOffAuthClient, type WorkTimeResponse } from "../core/api-client.js";
+import { PcOffApiClient, PcOffAuthClient, type WorkTimeResponse, type TenantLockPolicy } from "../core/api-client.js";
 import { resolveScreenType } from "../core/screen-display-logic.js";
 import {
   loadRuntimeConfig,
@@ -68,6 +68,12 @@ let cachedApiBaseUrl: string | null = null;
 let cachedUserServareaId = "";
 let cachedUserStaffId = "";
 
+/** FR-14: 잠금 정책 캐시 (Draft/Publish/Rollback 배포 — 30분 TTL, 주기 폴링으로 갱신) */
+const LOCK_POLICY_CACHE_TTL_MS = 30 * 60 * 1000; // 30분
+let lastCachedLockPolicy: TenantLockPolicy | null = null;
+let lastCachedLockPolicyAt = 0;
+let policyPollingIntervalId: ReturnType<typeof setInterval> | null = null;
+
 /** getApiClient 호출 시 반복 파일 I/O 방지 (state.json, config.json). 로그아웃 시 무효화 */
 const RUNTIME_CONFIG_CACHE_MS = 60_000; // 1분
 let cachedRuntimeConfig: { config: RuntimeConfig; at: number } | null = null;
@@ -77,6 +83,12 @@ function invalidateRuntimeConfigCache(): void {
   cachedApiBaseUrl = null;
   cachedUserServareaId = "";
   cachedUserStaffId = "";
+  lastCachedLockPolicy = null;
+  lastCachedLockPolicyAt = 0;
+  if (policyPollingIntervalId) {
+    clearInterval(policyPollingIntervalId);
+    policyPollingIntervalId = null;
+  }
 }
 
 /** 로컬 이석 감지(유휴/절전)로 잠금된 경우: 감지 시각·사유. PC-ON 해제 시 클리어 */
@@ -434,6 +446,28 @@ async function fetchLockScreenFromUrl(
   return out;
 }
 
+/** FR-14: 정책 객체를 WorkTimeResponse 형태로 병합 (lockScreen.screens, leaveSeatUnlockRequirePassword) */
+function mergeLockPolicyIntoData(data: WorkTimeResponse, policy: TenantLockPolicy): WorkTimeResponse {
+  const merged = { ...data } as Record<string, unknown>;
+  const screens = policy.lockScreen?.screens;
+  if (screens?.before) {
+    if (screens.before.title != null) merged.lockScreenBeforeTitle = screens.before.title;
+    if (screens.before.message != null) merged.lockScreenBeforeMessage = screens.before.message;
+  }
+  if (screens?.off) {
+    if (screens.off.title != null) merged.lockScreenOffTitle = screens.off.title;
+    if (screens.off.message != null) merged.lockScreenOffMessage = screens.off.message;
+  }
+  if (screens?.leave) {
+    if (screens.leave.title != null) merged.lockScreenLeaveTitle = screens.leave.title;
+    if (screens.leave.message != null) merged.lockScreenLeaveMessage = screens.leave.message;
+  }
+  if (policy.unlockPolicy?.leaveSeatUnlockRequirePassword !== undefined) {
+    merged.leaveSeatUnlockRequirePassword = policy.unlockPolicy.leaveSeatUnlockRequirePassword;
+  }
+  return merged as WorkTimeResponse;
+}
+
 /** 잠금화면 문구 포함 근태 조회 (getPcOffWorkTime + getLockScreenInfo / lockScreenApiUrl + config.json 병합). 핫키/잠금창 오픈 시 선호출용 */
 async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTimeResponse> {
   const config = await readJson<{
@@ -448,33 +482,25 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
 
   let data = await api.getPcOffWorkTime();
 
-  // FR-14: 전용 정책 API (있으면 우선 병합. 서버 미구현 시 무시)
+  // FR-14: 전용 정책 API — 캐시 유효 시 캐시 사용, 아니면 조회 후 캐시 갱신 (30분 TTL, 주기 폴링)
   if (cachedUserServareaId) {
-    try {
-      const policy = await api.getLockPolicy(cachedUserServareaId);
-      if (policy?.lockScreen?.screens || policy?.unlockPolicy) {
-        const merged = { ...data } as Record<string, unknown>;
-        const screens = policy.lockScreen?.screens;
-        if (screens?.before) {
-          if (screens.before.title != null) merged.lockScreenBeforeTitle = screens.before.title;
-          if (screens.before.message != null) merged.lockScreenBeforeMessage = screens.before.message;
+    const now = Date.now();
+    const cacheFresh = lastCachedLockPolicy != null && (now - lastCachedLockPolicyAt) < LOCK_POLICY_CACHE_TTL_MS;
+    let policy: TenantLockPolicy | null = cacheFresh ? lastCachedLockPolicy : null;
+    if (!policy) {
+      try {
+        policy = await api.getLockPolicy(cachedUserServareaId);
+        if (policy?.lockScreen?.screens || policy?.unlockPolicy) {
+          lastCachedLockPolicy = policy;
+          lastCachedLockPolicyAt = now;
         }
-        if (screens?.off) {
-          if (screens.off.title != null) merged.lockScreenOffTitle = screens.off.title;
-          if (screens.off.message != null) merged.lockScreenOffMessage = screens.off.message;
-        }
-        if (screens?.leave) {
-          if (screens.leave.title != null) merged.lockScreenLeaveTitle = screens.leave.title;
-          if (screens.leave.message != null) merged.lockScreenLeaveMessage = screens.leave.message;
-        }
-        if (policy.unlockPolicy?.leaveSeatUnlockRequirePassword !== undefined) {
-          merged.leaveSeatUnlockRequirePassword = policy.unlockPolicy.leaveSeatUnlockRequirePassword;
-        }
-        data = merged as WorkTimeResponse;
-        console.info("[PCOFF] 잠금화면 문구 — lock-policy API 적용됨");
+      } catch (e) {
+        console.info("[PCOFF] lock-policy API 미사용:", String(e));
       }
-    } catch (e) {
-      console.info("[PCOFF] lock-policy API 미사용:", String(e));
+    }
+    if (policy && (policy.lockScreen?.screens || policy.unlockPolicy)) {
+      data = mergeLockPolicyIntoData(data, policy);
+      if (!cacheFresh) console.info("[PCOFF] 잠금화면 문구 — lock-policy API 적용됨");
     }
   }
 
@@ -1022,7 +1048,33 @@ function startLockCheckInterval(): void {
     lockCheckIntervalId = setInterval(() => {
       void checkLockAndShowLockWindow(mainWindow ?? undefined);
     }, LOCK_CHECK_INTERVAL_MS);
+    startLockPolicyPolling();
   })();
+}
+
+/** FR-14: 30분 주기 정책 폴링 — Publish/Rollback 반영. 버전 비교 후 변경 시 캐시 갱신 */
+function startLockPolicyPolling(): void {
+  if (policyPollingIntervalId || !cachedUserServareaId) return;
+  policyPollingIntervalId = setInterval(() => {
+    void (async () => {
+      try {
+        const api = await getApiClient();
+        if (!api || !cachedUserServareaId) return;
+        const policy = await api.getLockPolicy(cachedUserServareaId);
+        if (!policy?.lockScreen?.screens && !policy?.unlockPolicy) return;
+        const versionChanged =
+          policy.version !== lastCachedLockPolicy?.version ||
+          lastCachedLockPolicy == null;
+        if (versionChanged) {
+          lastCachedLockPolicy = policy;
+          lastCachedLockPolicyAt = Date.now();
+          console.info("[PCOFF] 잠금 정책 폴링 — 캐시 갱신, version:", policy.version);
+        }
+      } catch {
+        // 서버 미구현/네트워크 시 무시
+      }
+    })();
+  }, LOCK_POLICY_CACHE_TTL_MS);
 }
 
 function stopLockCheckInterval(): void {

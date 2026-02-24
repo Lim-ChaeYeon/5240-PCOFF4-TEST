@@ -64,6 +64,7 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 | 임시연장 요청 | `/callPcOffTempDelay.do` | 임시연장 가능 여부 확인 후 호출 |
 | 긴급사용 요청 | `/callPcOffEmergencyUse.do` | 인증번호/사유 입력 후 긴급사용 시작/종료 |
 | 이석정보 서버 전송 (FR-12) | `/reportLeaveSeatEvent.do` | 이석 START/END 세션 기반 전송, 재시도 큐 |
+| 고객사 잠금 정책 (FR-14) | `GET /api/v1/pcoff/tenants/{tenantId}/lock-policy` | 조회·30분 폴링 캐시. Draft/Publish/Rollback: `POST .../lock-policy/draft`, `.../publish`, `.../rollback`(관리 콘솔용) |
 
 ---
 

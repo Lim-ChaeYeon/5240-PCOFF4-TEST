@@ -331,6 +331,18 @@ export class PcOffApiClient {
     return (await res.json()) as unknown;
   }
 
+  /** FR-14: JSON POST (v1 API — draft/publish/rollback, 배열 래핑 없음) */
+  private async postJson(endpoint: string, body: Record<string, unknown>): Promise<unknown> {
+    const url = `${this.config.baseUrl.replace(/\/$/, "")}${endpoint}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`${endpoint} failed: ${res.status}`);
+    return res.json() as Promise<unknown>;
+  }
+
   /**
    * FR-14: 전용 정책 API — 잠금화면·이석해제 비밀번호 등 고객사 정책 조회.
    * GET /api/v1/pcoff/tenants/{tenantId}/lock-policy
@@ -341,6 +353,39 @@ export class PcOffApiClient {
     const path = `/api/v1/pcoff/tenants/${encodeURIComponent(tenantId.trim())}/lock-policy`;
     const raw = await this.get(path);
     return (raw ?? null) as TenantLockPolicy | null;
+  }
+
+  /**
+   * FR-14: 잠금 정책 초안 저장 (관리 콘솔용). POST .../lock-policy/draft
+   * 서버 미구현 시 실패. 에이전트 일반 플로우에서는 호출하지 않음.
+   */
+  async saveLockPolicyDraft(tenantId: string, draft: Partial<TenantLockPolicy>): Promise<{ version?: number; success?: boolean }> {
+    if (!tenantId?.trim()) return {};
+    const path = `/api/v1/pcoff/tenants/${encodeURIComponent(tenantId.trim())}/lock-policy/draft`;
+    const raw = await this.postJson(path, draft as Record<string, unknown>);
+    return (raw ?? {}) as { version?: number; success?: boolean };
+  }
+
+  /**
+   * FR-14: 잠금 정책 게시 (관리 콘솔용). POST .../lock-policy/publish
+   * 게시 후 에이전트는 30분 폴링 또는 다음 조회 시 새 정책 반영.
+   */
+  async publishLockPolicy(tenantId: string, options?: { rolloutPolicy?: string }): Promise<{ version?: number; success?: boolean }> {
+    if (!tenantId?.trim()) return {};
+    const path = `/api/v1/pcoff/tenants/${encodeURIComponent(tenantId.trim())}/lock-policy/publish`;
+    const raw = await this.postJson(path, options ?? {});
+    return (raw ?? {}) as { version?: number; success?: boolean };
+  }
+
+  /**
+   * FR-14: 잠금 정책 롤백 (관리 콘솔용). POST .../lock-policy/rollback
+   * 이전 정상 버전으로 복원. 에이전트는 폴링 시 새 버전 수신.
+   */
+  async rollbackLockPolicy(tenantId: string): Promise<{ version?: number; success?: boolean }> {
+    if (!tenantId?.trim()) return {};
+    const path = `/api/v1/pcoff/tenants/${encodeURIComponent(tenantId.trim())}/lock-policy/rollback`;
+    const raw = await this.postJson(path, {});
+    return (raw ?? {}) as { version?: number; success?: boolean };
   }
 
   /**

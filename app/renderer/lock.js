@@ -85,13 +85,19 @@ function coerceWorkTimeFromApi(data) {
     breakEndTime: data.breakEndTime ?? null,
     leaveSeatTime: Number(data.leaveSeatTime ?? DEFAULT_WORK.leaveSeatTime ?? 0) || 0,
     screenType: data.screenType ?? DEFAULT_WORK.screenType,
-    // FR-14: 고객사 설정 잠금화면 문구 (서버에서 내려주면 적용)
+    // FR-14: 고객사 설정 잠금화면 문구·이미지 (서버/config에서 내려주면 적용)
     lockScreenBeforeTitle: data.lockScreenBeforeTitle ?? undefined,
     lockScreenBeforeMessage: data.lockScreenBeforeMessage ?? undefined,
     lockScreenOffTitle: data.lockScreenOffTitle ?? undefined,
     lockScreenOffMessage: data.lockScreenOffMessage ?? undefined,
     lockScreenLeaveTitle: data.lockScreenLeaveTitle ?? undefined,
-    lockScreenLeaveMessage: data.lockScreenLeaveMessage ?? undefined
+    lockScreenLeaveMessage: data.lockScreenLeaveMessage ?? undefined,
+    lockScreenBeforeBackground: data.lockScreenBeforeBackground ?? undefined,
+    lockScreenBeforeLogo: data.lockScreenBeforeLogo ?? undefined,
+    lockScreenOffBackground: data.lockScreenOffBackground ?? undefined,
+    lockScreenOffLogo: data.lockScreenOffLogo ?? undefined,
+    lockScreenLeaveBackground: data.lockScreenLeaveBackground ?? undefined,
+    lockScreenLeaveLogo: data.lockScreenLeaveLogo ?? undefined
   };
 }
 
@@ -337,10 +343,55 @@ function applyButtonDisp(work) {
   }
 }
 
+/** FR-14: 현재 screenType에 맞는 배경·로고 URL 적용 (서버/config에서 내려주면 적용) */
+function applyLockScreenImages(work) {
+  let backgroundUrl = "";
+  let logoUrl = "";
+  const st = (work.screenType ?? "").toLowerCase();
+  if (st === "before") {
+    backgroundUrl = work.lockScreenBeforeBackground ?? "";
+    logoUrl = work.lockScreenBeforeLogo ?? "";
+  } else if (st === "empty") {
+    backgroundUrl = work.lockScreenLeaveBackground ?? "";
+    logoUrl = work.lockScreenLeaveLogo ?? "";
+  } else {
+    backgroundUrl = work.lockScreenOffBackground ?? "";
+    logoUrl = work.lockScreenOffLogo ?? "";
+  }
+  if (document.body) {
+    if (backgroundUrl && backgroundUrl.trim()) {
+      document.body.style.backgroundImage = `url(${CSS.escape(backgroundUrl.trim())})`;
+      document.body.style.backgroundSize = "cover";
+      document.body.style.backgroundPosition = "center";
+    } else {
+      document.body.style.backgroundImage = "";
+      document.body.style.backgroundSize = "";
+      document.body.style.backgroundPosition = "";
+    }
+  }
+  const logoImg = document.getElementById("lock-logo-img");
+  const logoMark = document.querySelector(".logo-item .logo-mark");
+  if (logoImg && logoMark) {
+    if (logoUrl && logoUrl.trim()) {
+      logoImg.src = logoUrl.trim();
+      logoImg.alt = "로고";
+      logoImg.style.display = "";
+      logoMark.style.display = "none";
+    } else {
+      logoImg.src = "";
+      logoImg.style.display = "none";
+      logoMark.style.display = "";
+    }
+  }
+}
+
 function applyLockInfo(work) {
   const now = new Date();
   const startTime = parseYmdHm(work.pcOnYmdTime);
   const offTime = parseYmdHm(work.pcOffYmdTime);
+
+  // FR-14: 배경·로고 이미지 적용 (screenType별)
+  applyLockScreenImages(work);
 
   // 메시지 로그: 서버에서 받은 잠금화면 문구 여부 확인용
   const lockScreenFromServer = {

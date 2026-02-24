@@ -176,6 +176,8 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 
 **FR-14 잠금화면 문구:** 서버에서 `lockScreenBeforeTitle`/`lockScreenBeforeMessage`, `lockScreenOffTitle`/`lockScreenOffMessage`, `lockScreenLeaveTitle`/`lockScreenLeaveMessage`를 내려주면 잠금화면에 우선 적용한다. 미제공 시 클라이언트는 선택 API `getLockScreenInfo.do`로 설정값을 보강할 수 있다.
 
+**FR-14 잠금화면 배경·로고:** 서버 또는 getLockScreenInfo의 `send_data`에서 `Background`·`Logo` URL을 내려주면, 클라이언트는 `screenType`(before/off/empty)별로 body 배경 이미지와 헤더 로고 이미지(`#lock-logo-img`)에 적용한다. config.json `lockScreen.before/off/leave.backgroundUrl`·`logoUrl`로도 동일하게 지정 가능하며, API와 병합 후 적용된다.
+
 ---
 
 ### 2.3.1 잠금화면 설정 조회 (선택)

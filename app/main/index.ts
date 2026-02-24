@@ -406,7 +406,10 @@ async function fetchLockScreenFromUrl(
     body
   });
   if (!res.ok) throw new Error(`${url} ${res.status}`);
-  const json = (await res.json()) as { status?: string; send_data?: Array<{ ScreenType?: string; LockTitle?: string; LockMessage?: string }> };
+  const json = (await res.json()) as {
+    status?: string;
+    send_data?: Array<{ ScreenType?: string; LockTitle?: string; LockMessage?: string; Background?: string; Logo?: string }>;
+  };
   const list = json?.send_data ?? [];
   const out: Partial<WorkTimeResponse> = {};
   for (const item of list) {
@@ -414,12 +417,18 @@ async function fetchLockScreenFromUrl(
     if (t === "before") {
       if (item.LockTitle != null) out.lockScreenBeforeTitle = String(item.LockTitle);
       if (item.LockMessage != null) out.lockScreenBeforeMessage = String(item.LockMessage);
+      if (item.Background != null) out.lockScreenBeforeBackground = String(item.Background);
+      if (item.Logo != null) out.lockScreenBeforeLogo = String(item.Logo);
     } else if (t === "off") {
       if (item.LockTitle != null) out.lockScreenOffTitle = String(item.LockTitle);
       if (item.LockMessage != null) out.lockScreenOffMessage = String(item.LockMessage);
+      if (item.Background != null) out.lockScreenOffBackground = String(item.Background);
+      if (item.Logo != null) out.lockScreenOffLogo = String(item.Logo);
     } else if (t === "empty" || t === "leave") {
       if (item.LockTitle != null) out.lockScreenLeaveTitle = String(item.LockTitle);
       if (item.LockMessage != null) out.lockScreenLeaveMessage = String(item.LockMessage);
+      if (item.Background != null) out.lockScreenLeaveBackground = String(item.Background);
+      if (item.Logo != null) out.lockScreenLeaveLogo = String(item.Logo);
     }
   }
   return out;
@@ -429,9 +438,9 @@ async function fetchLockScreenFromUrl(
 async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTimeResponse> {
   const config = await readJson<{
     lockScreen?: {
-      before?: { title?: string; message?: string };
-      off?: { title?: string; message?: string };
-      leave?: { title?: string; message?: string };
+      before?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
+      off?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
+      leave?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
     };
     /** WebView와 동일한 잠금화면 API URL (예: https://5240.work/LockScreen/getScreenInfo.php). 설정 시 getLockScreenInfo.do 실패해도 이 URL로 문구 조회 */
     lockScreenApiUrl?: string;
@@ -460,6 +469,12 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
       if (screenInfo.lockScreenOffMessage != null) merged.lockScreenOffMessage = screenInfo.lockScreenOffMessage;
       if (screenInfo.lockScreenLeaveTitle != null) merged.lockScreenLeaveTitle = screenInfo.lockScreenLeaveTitle;
       if (screenInfo.lockScreenLeaveMessage != null) merged.lockScreenLeaveMessage = screenInfo.lockScreenLeaveMessage;
+      if (screenInfo.lockScreenBeforeBackground != null) merged.lockScreenBeforeBackground = screenInfo.lockScreenBeforeBackground;
+      if (screenInfo.lockScreenBeforeLogo != null) merged.lockScreenBeforeLogo = screenInfo.lockScreenBeforeLogo;
+      if (screenInfo.lockScreenOffBackground != null) merged.lockScreenOffBackground = screenInfo.lockScreenOffBackground;
+      if (screenInfo.lockScreenOffLogo != null) merged.lockScreenOffLogo = screenInfo.lockScreenOffLogo;
+      if (screenInfo.lockScreenLeaveBackground != null) merged.lockScreenLeaveBackground = screenInfo.lockScreenLeaveBackground;
+      if (screenInfo.lockScreenLeaveLogo != null) merged.lockScreenLeaveLogo = screenInfo.lockScreenLeaveLogo;
       data = merged as WorkTimeResponse;
       console.info("[PCOFF] 잠금화면 문구 — getLockScreenInfo.do 적용됨");
     } else if (config.lockScreenApiUrl?.trim() && cachedUserServareaId) {
@@ -475,6 +490,12 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
           if (fromUrl.lockScreenOffMessage != null) merged.lockScreenOffMessage = fromUrl.lockScreenOffMessage;
           if (fromUrl.lockScreenLeaveTitle != null) merged.lockScreenLeaveTitle = fromUrl.lockScreenLeaveTitle;
           if (fromUrl.lockScreenLeaveMessage != null) merged.lockScreenLeaveMessage = fromUrl.lockScreenLeaveMessage;
+          if (fromUrl.lockScreenBeforeBackground != null) merged.lockScreenBeforeBackground = fromUrl.lockScreenBeforeBackground;
+          if (fromUrl.lockScreenBeforeLogo != null) merged.lockScreenBeforeLogo = fromUrl.lockScreenBeforeLogo;
+          if (fromUrl.lockScreenOffBackground != null) merged.lockScreenOffBackground = fromUrl.lockScreenOffBackground;
+          if (fromUrl.lockScreenOffLogo != null) merged.lockScreenOffLogo = fromUrl.lockScreenOffLogo;
+          if (fromUrl.lockScreenLeaveBackground != null) merged.lockScreenLeaveBackground = fromUrl.lockScreenLeaveBackground;
+          if (fromUrl.lockScreenLeaveLogo != null) merged.lockScreenLeaveLogo = fromUrl.lockScreenLeaveLogo;
           data = merged as WorkTimeResponse;
           console.info("[PCOFF] 잠금화면 문구 — lockScreenApiUrl 적용됨");
         }
@@ -489,18 +510,30 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
       if (!merged.lockScreenBeforeTitle && ls.before?.title) {
         merged.lockScreenBeforeTitle = ls.before.title;
         if (ls.before.message) merged.lockScreenBeforeMessage = ls.before.message;
+        if (ls.before.backgroundUrl) merged.lockScreenBeforeBackground = ls.before.backgroundUrl;
+        if (ls.before.logoUrl) merged.lockScreenBeforeLogo = ls.before.logoUrl;
         applied = true;
       }
       if (!merged.lockScreenOffTitle && ls.off?.title) {
         merged.lockScreenOffTitle = ls.off.title;
         if (ls.off.message) merged.lockScreenOffMessage = ls.off.message;
+        if (ls.off.backgroundUrl) merged.lockScreenOffBackground = ls.off.backgroundUrl;
+        if (ls.off.logoUrl) merged.lockScreenOffLogo = ls.off.logoUrl;
         applied = true;
       }
       if (!merged.lockScreenLeaveTitle && ls.leave?.title) {
         merged.lockScreenLeaveTitle = ls.leave.title;
         if (ls.leave.message) merged.lockScreenLeaveMessage = ls.leave.message;
+        if (ls.leave.backgroundUrl) merged.lockScreenLeaveBackground = ls.leave.backgroundUrl;
+        if (ls.leave.logoUrl) merged.lockScreenLeaveLogo = ls.leave.logoUrl;
         applied = true;
       }
+      if (!merged.lockScreenBeforeBackground && ls.before?.backgroundUrl) { merged.lockScreenBeforeBackground = ls.before.backgroundUrl; applied = true; }
+      if (!merged.lockScreenBeforeLogo && ls.before?.logoUrl) { merged.lockScreenBeforeLogo = ls.before.logoUrl; applied = true; }
+      if (!merged.lockScreenOffBackground && ls.off?.backgroundUrl) { merged.lockScreenOffBackground = ls.off.backgroundUrl; applied = true; }
+      if (!merged.lockScreenOffLogo && ls.off?.logoUrl) { merged.lockScreenOffLogo = ls.off.logoUrl; applied = true; }
+      if (!merged.lockScreenLeaveBackground && ls.leave?.backgroundUrl) { merged.lockScreenLeaveBackground = ls.leave.backgroundUrl; applied = true; }
+      if (!merged.lockScreenLeaveLogo && ls.leave?.logoUrl) { merged.lockScreenLeaveLogo = ls.leave.logoUrl; applied = true; }
       if (applied) {
         data = merged as WorkTimeResponse;
         console.info("[PCOFF] 잠금화면 문구 — config.json lockScreen 적용됨");
@@ -514,18 +547,30 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
       if (!merged.lockScreenBeforeTitle && ls.before?.title) {
         merged.lockScreenBeforeTitle = ls.before.title;
         if (ls.before.message) merged.lockScreenBeforeMessage = ls.before.message;
+        if (ls.before.backgroundUrl) merged.lockScreenBeforeBackground = ls.before.backgroundUrl;
+        if (ls.before.logoUrl) merged.lockScreenBeforeLogo = ls.before.logoUrl;
         applied = true;
       }
       if (!merged.lockScreenOffTitle && ls.off?.title) {
         merged.lockScreenOffTitle = ls.off.title;
         if (ls.off.message) merged.lockScreenOffMessage = ls.off.message;
+        if (ls.off.backgroundUrl) merged.lockScreenOffBackground = ls.off.backgroundUrl;
+        if (ls.off.logoUrl) merged.lockScreenOffLogo = ls.off.logoUrl;
         applied = true;
       }
       if (!merged.lockScreenLeaveTitle && ls.leave?.title) {
         merged.lockScreenLeaveTitle = ls.leave.title;
         if (ls.leave.message) merged.lockScreenLeaveMessage = ls.leave.message;
+        if (ls.leave.backgroundUrl) merged.lockScreenLeaveBackground = ls.leave.backgroundUrl;
+        if (ls.leave.logoUrl) merged.lockScreenLeaveLogo = ls.leave.logoUrl;
         applied = true;
       }
+      if (!merged.lockScreenBeforeBackground && ls.before?.backgroundUrl) { merged.lockScreenBeforeBackground = ls.before.backgroundUrl; applied = true; }
+      if (!merged.lockScreenBeforeLogo && ls.before?.logoUrl) { merged.lockScreenBeforeLogo = ls.before.logoUrl; applied = true; }
+      if (!merged.lockScreenOffBackground && ls.off?.backgroundUrl) { merged.lockScreenOffBackground = ls.off.backgroundUrl; applied = true; }
+      if (!merged.lockScreenOffLogo && ls.off?.logoUrl) { merged.lockScreenOffLogo = ls.off.logoUrl; applied = true; }
+      if (!merged.lockScreenLeaveBackground && ls.leave?.backgroundUrl) { merged.lockScreenLeaveBackground = ls.leave.backgroundUrl; applied = true; }
+      if (!merged.lockScreenLeaveLogo && ls.leave?.logoUrl) { merged.lockScreenLeaveLogo = ls.leave.logoUrl; applied = true; }
       if (applied) data = merged as WorkTimeResponse;
     }
   }
@@ -1515,19 +1560,25 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     try {
       const config = await readJson<{
         lockScreen?: {
-          before?: { title?: string; message?: string };
-          off?: { title?: string; message?: string };
-          leave?: { title?: string; message?: string };
+          before?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
+          off?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
+          leave?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
         };
       }>(join(baseDir, PATHS.config), {});
       const ls = config.lockScreen;
       if (ls) {
         if (ls.before?.title) fallbackData.lockScreenBeforeTitle = ls.before.title;
         if (ls.before?.message) fallbackData.lockScreenBeforeMessage = ls.before.message;
+        if (ls.before?.backgroundUrl) fallbackData.lockScreenBeforeBackground = ls.before.backgroundUrl;
+        if (ls.before?.logoUrl) fallbackData.lockScreenBeforeLogo = ls.before.logoUrl;
         if (ls.off?.title) fallbackData.lockScreenOffTitle = ls.off.title;
         if (ls.off?.message) fallbackData.lockScreenOffMessage = ls.off.message;
+        if (ls.off?.backgroundUrl) fallbackData.lockScreenOffBackground = ls.off.backgroundUrl;
+        if (ls.off?.logoUrl) fallbackData.lockScreenOffLogo = ls.off.logoUrl;
         if (ls.leave?.title) fallbackData.lockScreenLeaveTitle = ls.leave.title;
         if (ls.leave?.message) fallbackData.lockScreenLeaveMessage = ls.leave.message;
+        if (ls.leave?.backgroundUrl) fallbackData.lockScreenLeaveBackground = ls.leave.backgroundUrl;
+        if (ls.leave?.logoUrl) fallbackData.lockScreenLeaveLogo = ls.leave.logoUrl;
       }
     } catch {
       // ignore

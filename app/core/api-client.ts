@@ -118,6 +118,18 @@ export interface WorkTimeResponse {
   lockScreenLeaveTitle?: string;
   /** 이석(leave/empty) 잠금 안내 문구 */
   lockScreenLeaveMessage?: string;
+  /** 시업 전(before) 배경 이미지 URL */
+  lockScreenBeforeBackground?: string;
+  /** 시업 전(before) 로고 이미지 URL */
+  lockScreenBeforeLogo?: string;
+  /** 종업(off) 배경 이미지 URL */
+  lockScreenOffBackground?: string;
+  /** 종업(off) 로고 이미지 URL */
+  lockScreenOffLogo?: string;
+  /** 이석(leave/empty) 배경 이미지 URL */
+  lockScreenLeaveBackground?: string;
+  /** 이석(leave/empty) 로고 이미지 URL */
+  lockScreenLeaveLogo?: string;
 }
 
 /** 잠금화면 설정 조회 API 응답 항목 (getLockScreenInfo.send_data 요소) */
@@ -313,12 +325,18 @@ export class PcOffApiClient {
       if (t === "before") {
         if (item.LockTitle != null) out.lockScreenBeforeTitle = String(item.LockTitle);
         if (item.LockMessage != null) out.lockScreenBeforeMessage = String(item.LockMessage);
+        if (item.Background != null) out.lockScreenBeforeBackground = String(item.Background);
+        if (item.Logo != null) out.lockScreenBeforeLogo = String(item.Logo);
       } else if (t === "off") {
         if (item.LockTitle != null) out.lockScreenOffTitle = String(item.LockTitle);
         if (item.LockMessage != null) out.lockScreenOffMessage = String(item.LockMessage);
+        if (item.Background != null) out.lockScreenOffBackground = String(item.Background);
+        if (item.Logo != null) out.lockScreenOffLogo = String(item.Logo);
       } else if (t === "empty" || t === "leave") {
         if (item.LockTitle != null) out.lockScreenLeaveTitle = String(item.LockTitle);
         if (item.LockMessage != null) out.lockScreenLeaveMessage = String(item.LockMessage);
+        if (item.Background != null) out.lockScreenLeaveBackground = String(item.Background);
+        if (item.Logo != null) out.lockScreenLeaveLogo = String(item.Logo);
       }
     }
     return out;

@@ -590,3 +590,48 @@ export async function reportAgentEvents(
   });
   if (!res.ok) throw new ReportAgentEventsHttpError(res.status);
 }
+
+/** FR-18: Kill 통제 — Process Fingerprint (PID 재사용 공격 방지) */
+export interface KillProcessFingerprint {
+  pid: number;
+  createdAt: string;
+  exePath: string;
+  cmdLine?: string;
+  exeHash?: string;
+}
+
+/** FR-18: Kill 요청 등록 응답 (서버 미구현 시 사용 안 함) */
+export interface KillRequestResponse {
+  id: string;
+  message?: string;
+}
+
+/** FR-18: OTP 검증 성공 시 KillToken (TTL 2분) */
+export interface KillVerifyOtpResponse {
+  token: string;
+  expiresAt?: string;
+}
+
+/** FR-18: Kill API 스텁. 서버(/kill-requests, /kill-requests/{id}/verify-otp, /kill-execute) 구현 전까지 미사용. 구현 후 연동. */
+export async function createKillRequest(
+  _baseUrl: string,
+  _payload: { deviceId?: string; userStaffId?: string; reason?: string }
+): Promise<KillRequestResponse> {
+  throw new Error("Kill control API not implemented: createKillRequest");
+}
+
+export async function verifyKillOtp(
+  _baseUrl: string,
+  _requestId: string,
+  _otp: string
+): Promise<KillVerifyOtpResponse> {
+  throw new Error("Kill control API not implemented: verifyKillOtp");
+}
+
+export async function killExecute(
+  _baseUrl: string,
+  _token: string,
+  _fingerprint: KillProcessFingerprint
+): Promise<{ allowed: boolean }> {
+  throw new Error("Kill control API not implemented: killExecute");
+}

@@ -560,6 +560,15 @@ function applyLockInfo(work) {
   else if (lockInfoEl) lockInfoEl.style.display = "";
 }
 
+// 보조 잠금창: 메인에서 동일 근태/배경 데이터 수신 후 적용 (주모니터와 동일 문구·배경)
+if (typeof window !== "undefined" && window.pcoffApi?.onLockInitialWork) {
+  window.pcoffApi.onLockInitialWork((data) => {
+    const work = coerceWorkTimeFromApi(data);
+    applyLockInfo(work);
+    applyButtonDisp(work);
+  });
+}
+
 async function loadUserInfo() {
   if (!window.pcoffApi?.getCurrentUser || !userDisplayEl) return;
   try {

@@ -88,6 +88,12 @@ const api = {
       data: Record<string, unknown>;
       error?: string;
     }>,
+  /** 보조 잠금창: 메인에서 동일 근태/배경 데이터 수신 후 적용 */
+  onLockInitialWork: (callback: (data: Record<string, unknown>) => void) => {
+    const handler = (_event: IpcRendererEvent, data: Record<string, unknown>) => callback(data);
+    ipcRenderer.on("pcoff:lock-initial-work", handler);
+    return () => ipcRenderer.removeListener("pcoff:lock-initial-work", handler);
+  },
   requestPcExtend: (pcOffYmdTime?: string) =>
     ipcRenderer.invoke("pcoff:requestPcExtend", { pcOffYmdTime }) as Promise<{
       source: "api" | "mock" | "fallback";

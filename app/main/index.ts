@@ -62,6 +62,10 @@ let isForceQuit = false;
 /** FR-19: 격리 모드(복구 실패 시) — 잠금 유지, 운영팀 조치 대기 */
 let isolationModeActive = false;
 
+/** macOS 다중 디스플레이: blur 시 재포커스 디바운스 (본/보조 간 무한 이동 방지) */
+let lastLockBlurRefocusAt = 0;
+const LOCK_BLUR_REFOCUS_DEBOUNCE_MS = 500;
+
 // 현재 운영 모드
 type OperationMode = "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE" | "EMERGENCY_RELEASE";
 let currentMode: OperationMode = "NORMAL";
@@ -324,6 +328,11 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   // 잠금화면 중 Cmd+Tab(앱 전환) 등으로 포커스가 빠지면 다시 맨 앞으로 가져옴
   win.on("blur", () => {
     if (currentScreen !== "lock" || win.isDestroyed()) return;
+    if (process.platform === "darwin" && lockWindowsByDisplayId.size > 0) {
+      const now = Date.now();
+      if (now - lastLockBlurRefocusAt < LOCK_BLUR_REFOCUS_DEBOUNCE_MS) return;
+      lastLockBlurRefocusAt = now;
+    }
     setTimeout(() => {
       if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
       app.focus({ steal: true });
@@ -340,10 +349,10 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   });
 }
 
-/** 보조 잠금창 전부 닫기 (해제/로그인 전환 시 호출) */
+/** 보조 잠금창 전부 닫기 (해제/로그인 전환 시 호출). destroy()로 강제 제거(close 방지 우회). */
 function closeAllLockWindows(): void {
   for (const win of lockWindowsByDisplayId.values()) {
-    if (!win.isDestroyed()) win.close();
+    if (!win.isDestroyed()) win.destroy();
   }
   lockWindowsByDisplayId.clear();
 }
@@ -356,22 +365,24 @@ function attachLockWindowBehavior(win: BrowserWindow): void {
   win.on("leave-full-screen", () => {
     if (currentScreen === "lock" && !win.isDestroyed()) win.setFullScreen(true);
   });
-  win.on("blur", () => {
-    if (currentScreen !== "lock" || win.isDestroyed()) return;
-    setTimeout(() => {
-      if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
-      app.focus({ steal: true });
+  if (process.platform !== "darwin") {
+    win.on("blur", () => {
+      if (currentScreen !== "lock" || win.isDestroyed()) return;
       setTimeout(() => {
         if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
-        win.moveTop();
-        win.show();
-        win.setAlwaysOnTop(false);
-        win.setAlwaysOnTop(true, "screen-saver");
-        win.setFullScreen(true);
-        win.focus();
-      }, 50);
-    }, 100);
-  });
+        app.focus({ steal: true });
+        setTimeout(() => {
+          if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
+          win.moveTop();
+          win.show();
+          win.setAlwaysOnTop(false);
+          win.setAlwaysOnTop(true, "screen-saver");
+          win.setFullScreen(true);
+          win.focus();
+        }, 50);
+      }, 100);
+    });
+  }
 }
 
 /** 다중 디스플레이: 주 디스플레이 제외 보조 디스플레이마다 잠금창 1개 생성·동기화 (§7·§11) */
@@ -384,7 +395,7 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
   // 제거된 디스플레이에 해당하는 창 닫기
   for (const [displayId, win] of lockWindowsByDisplayId.entries()) {
     if (!secondaries.some((d) => d.id === displayId)) {
-      if (!win.isDestroyed()) win.close();
+      if (!win.isDestroyed()) win.destroy();
       lockWindowsByDisplayId.delete(displayId);
     }
   }
@@ -400,6 +411,7 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
       height: display.bounds.height,
       x: display.bounds.x,
       y: display.bounds.y,
+      show: false,
       fullscreenable: true,
       resizable: false,
       minimizable: true,
@@ -415,13 +427,19 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
     win.setVisibleOnAllWorkspaces(true);
     attachLockWindowBehavior(win);
     win.on("closed", () => lockWindowsByDisplayId.delete(display.id));
+    win.webContents.once("did-finish-load", () => {
+      if (win.isDestroyed() || currentScreen !== "lock") return;
+      win.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
+    });
     await loadRendererInWindow(win, "lock.html").catch((err) => {
       console.error("[PCOFF] 보조 잠금창 로드 실패:", display.id, err);
     });
     if (!win.isDestroyed() && currentScreen === "lock") {
-      win.setFullScreen(true);
+      win.setBounds(display.bounds);
       win.setAlwaysOnTop(true, "screen-saver");
       win.show();
+      // 보조 디스플레이에 먼저 배치·표시한 뒤 풀스크린 → 해당 디스플레이에서 풀스크린됨 (macOS 포함)
+      win.setFullScreen(true);
     }
     lockWindowsByDisplayId.set(display.id, win);
   }
@@ -459,6 +477,7 @@ function attachWindowHotkeys(win: BrowserWindow): void {
  */
 function showTrayInfoInCurrentWindow(): void {
   if (isolationModeActive) return;
+  currentScreen = "tray-info";
   closeAllLockWindows();
   if (!mainWindow || mainWindow.isDestroyed()) {
     void createTrayInfoWindow();
@@ -997,6 +1016,7 @@ async function doGlobalLogout(): Promise<void> {
  * 잠금화면과 같은 창(mainWindow) 재사용 — 로그인 후 잠금 시 같은 창에서 전환
  */
 function createLoginWindow(): void {
+  currentScreen = "login";
   closeAllLockWindows();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setFullScreen(false);
@@ -1634,7 +1654,7 @@ app.whenReady().then(async () => {
   });
   screen.on("display-removed", (_event, display) => {
     const win = lockWindowsByDisplayId.get(display.id);
-    if (win && !win.isDestroyed()) win.close();
+    if (win && !win.isDestroyed()) win.destroy();
     lockWindowsByDisplayId.delete(display.id);
   });
 

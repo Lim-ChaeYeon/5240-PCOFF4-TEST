@@ -40,6 +40,35 @@ function isUpdateNotFoundError(message: string): boolean {
   );
 }
 
+/** 업데이트 실패 원인에 따른 로그 코드 반환 (구분 로깅: 서명/해시/네트워크) */
+function getUpdateFailureLogCode(message: string): string {
+  const m = String(message).toLowerCase();
+  if (
+    m.includes("signature") ||
+    m.includes("signature verification") ||
+    (m.includes("verify") && (m.includes("cert") || m.includes("sign")))
+  )
+    return LOG_CODES.UPDATE_SIGNATURE_INVALID;
+  if (
+    m.includes("hash") ||
+    m.includes("checksum") ||
+    m.includes("sha256") ||
+    m.includes("integrity")
+  )
+    return LOG_CODES.UPDATE_HASH_MISMATCH;
+  if (
+    m.includes("econnrefused") ||
+    m.includes("enotfound") ||
+    m.includes("etimedout") ||
+    m.includes("network") ||
+    m.includes("fetch") ||
+    m.includes("net::") ||
+    m.includes("getaddrinfo")
+  )
+    return LOG_CODES.UPDATE_NETWORK_ERROR;
+  return LOG_CODES.UPDATE_FAILED;
+}
+
 // 개발 모드에서 프로젝트 루트 package.json 경로 (dist/app/core → 프로젝트 루트)
 const getProjectRootPackagePath = (): string => {
   const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -171,7 +200,8 @@ export class UpdateManager {
           }
           this.status = { state: "error", error: errorMessage };
           console.warn("[UpdateManager] error:", errorMessage, error);
-          this.logger.write(LOG_CODES.UPDATE_FAILED, "WARN", { error: errorMessage }).catch(() => {});
+          const logCode = getUpdateFailureLogCode(errorMessage);
+          this.logger.write(logCode, "WARN", { error: errorMessage }).catch(() => {});
           this.sendStatusToRenderer();
           try {
             await this.enqueueRetry("latest", errorMessage);
@@ -330,7 +360,8 @@ export class UpdateManager {
     // 최대 재시도 횟수 초과 시 제거
     const filtered = queue.filter((item) => item.retryCount <= MAX_RETRY_COUNT);
     await writeJson(queuePath, filtered);
-    await this.logger.write(LOG_CODES.UPDATE_FAILED, "WARN", {
+    const logCode = getUpdateFailureLogCode(reason);
+    await this.logger.write(logCode, "WARN", {
       version,
       reason,
       queuedForRetry: true,

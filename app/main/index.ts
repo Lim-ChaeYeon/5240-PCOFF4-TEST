@@ -517,6 +517,7 @@ function showTrayInfoInCurrentWindow(): void {
   mainWindow.setFullScreen(false);
   mainWindow.setAlwaysOnTop(false);
   mainWindow.setVisibleOnAllWorkspaces(false);
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
   currentScreen = "tray-info";
   mainWindow.setSize(620, 840);
   mainWindow.setTitle("PCOFF 작동정보");
@@ -526,6 +527,7 @@ function showTrayInfoInCurrentWindow(): void {
   const win = mainWindow;
   const showWhenReady = () => {
     if (win.isDestroyed() || currentScreen !== "tray-info") return;
+    if (win.isMaximized()) win.unmaximize();
     win.setSize(620, 840);
     win.center();
     win.show();
@@ -540,6 +542,7 @@ function showTrayInfoInCurrentWindow(): void {
     if (!win || win.isDestroyed()) return;
     void loadMainHtmlWithRetry(win).then(() => {
       if (win.isDestroyed() || currentScreen !== "tray-info") return;
+      if (win.isMaximized()) win.unmaximize();
       win.setSize(620, 840);
       win.center();
       setTimeout(() => {
@@ -576,6 +579,7 @@ async function createTrayInfoWindow(): Promise<void> {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "tray-info";
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
     mainWindow.setSize(620, 840);
     mainWindow.setTitle("PCOFF 작동정보");
     mainWindow.show();
@@ -609,6 +613,8 @@ async function createTrayInfoWindow(): Promise<void> {
   attachMainWindowCloseHandler(win);
   attachWindowHotkeys(win);
   win.once("ready-to-show", () => {
+    if (win.isMaximized()) win.unmaximize();
+    win.setSize(620, 840);
     win.show();
     win.focus();
     if (process.platform === "win32") {
@@ -619,6 +625,8 @@ async function createTrayInfoWindow(): Promise<void> {
   });
   loadMainHtmlWithRetry(win).catch((err) => {
     console.error("[PCOFF] Failed to load main.html:", err);
+    if (win.isMaximized()) win.unmaximize();
+    win.setSize(620, 840);
     win.show();
     win.focus();
     if (process.platform === "win32") {
@@ -1093,6 +1101,7 @@ function createLoginWindow(): void {
     mainWindow.setFullScreen(false);
     mainWindow.setAlwaysOnTop(false);
     mainWindow.setVisibleOnAllWorkspaces(false);
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
     currentScreen = "login";
     mainWindow.setSize(520, 620);
     mainWindow.setTitle("PCOFF 로그인");
@@ -1101,6 +1110,7 @@ function createLoginWindow(): void {
     mainWindow.focus();
     setImmediate(() => {
       if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "login") {
+        if (mainWindow.isMaximized()) mainWindow.unmaximize();
         mainWindow.setSize(520, 620);
         mainWindow.focus();
       }
@@ -1112,6 +1122,7 @@ function createLoginWindow(): void {
     width: 520,
     height: 620,
     resizable: false,
+    maximizable: false,
     title: "PCOFF 로그인",
     webPreferences: {
       contextIsolation: true,
@@ -1857,8 +1868,13 @@ app.on("activate", () => {
     if (isolationModeActive) void createLockWindow();
     else showTrayInfoInCurrentWindow();
   } else {
-    mainWindow!.show();
-    mainWindow!.focus();
+    const w = mainWindow!;
+    if (!w.isFullScreen() && (currentScreen === "tray-info" || currentScreen === "login")) {
+      if (w.isMaximized()) w.unmaximize();
+      w.setSize(currentScreen === "login" ? 520 : 620, currentScreen === "login" ? 620 : 840);
+    }
+    w.show();
+    w.focus();
   }
 });
 

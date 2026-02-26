@@ -25,27 +25,27 @@ function parseExCountRenewal(value: string | undefined): Date | null {
 
 /**
  * 근태 데이터와 현재 시각·이석 여부로 표시용 screenType 결정
- * - 로컬 이석 감지 중이면 항상 "empty"
- * - 서버 screenType이 "empty"면 "empty"
- * - exCountRenewal 있으면: now < exCountRenewal → "off", else → "before"
- * - 없으면 서버 screenType 사용, 없으면 "off"
+ * - 이미 잠금화면(종업 off / 시업 전 before)이면 이석을 적용하지 않음(이석 체크 생략)
+ * - exCountRenewal 있으면: now < renewal → "off", else → "before" (종업/시업 전 잠금이면 이석 미적용)
+ * - 서버 screenType이 "before" 또는 "off"이면 그대로 반환
+ * - 그 외 로컬 이석 감지 중이면 "empty", 서버가 "empty"면 "empty"
  */
 export function resolveScreenType(
   work: Partial<WorkTimeResponse> & { screenType?: string },
   now: Date = new Date(),
   isLeaveSeatDetected: boolean = false
 ): ScreenType {
-  if (isLeaveSeatDetected) return "empty";
-  const serverScreenType = (work.screenType ?? "").toString().toLowerCase();
-  if (serverScreenType === "empty") return "empty";
-
   const renewal = parseExCountRenewal(work.exCountRenewal);
   if (renewal) {
     return now < renewal ? "off" : "before";
   }
 
+  const serverScreenType = (work.screenType ?? "").toString().toLowerCase();
   if (serverScreenType === "before" || serverScreenType === "off") {
     return serverScreenType as ScreenType;
   }
+
+  if (isLeaveSeatDetected) return "empty";
+  if (serverScreenType === "empty") return "empty";
   return "off";
 }

@@ -173,6 +173,7 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 | `leaveSeatReasonTime` | 이석 후 사유 입력 기준시간(분) |
 | `leaveSeatReasonYn`, `leaveSeatReasonManYn` | 이석 후 PC ON 시 사유 입력 여부, 사유 필수 여부(YES/NO) |
 | `leaveSeatOffInputMath` | 이석 관련 입력 처리 구분값(0/1/2/3) |
+| `leaveSeatUnlockRequirePassword` | 이석 해제 시 비밀번호 입력 필수 여부(true/false). lock-policy API 또는 getPcOffWorkTime 응답에서 내려줌. true면 잠금화면 PC-ON 클릭 시 비밀번호 모달 후 검증 필요. |
 | `weekCreWorkTime`, `weekWorkTime` | 주 기준 근로시간, 해당 주 누적 근로시간 |
 | `weekLmtOtTime`, `weekUseOtTime`, `weekApplOtTime` | 주 연장근로 한도·사용·신청 시간 |
 | `apiCallLogYesNo` | API 호출 로그 저장 여부(YES/NO) |
@@ -251,6 +252,22 @@ API마다 달라질 수 있으나, 일반적으로 다음 값이 함께 전달�
 **퇴근 규칙:** OUT 로그 호출 코드 중 가장 늦은 시간으로 퇴근 기록. 예: Power Off, Agent Off, Lock On, Lock On-이석시작, Lock On-임시연장 종료, Lock On-긴급사용 종료.
 
 > **Note:** 로그 코드 매핑은 `docs/operations/logcode.md`에 정의되어 있다.
+
+---
+
+### 2.4.1 이석 해제용 비밀번호 (FR-14)
+
+**설정값**
+
+| 출처 | 필드/설정 | 설명 |
+|------|-----------|------|
+| `getPcOffWorkTime.do` 응답 또는 lock-policy | `leaveSeatUnlockRequirePassword` | 이석 해제 시 비밀번호 입력 필수 여부(true/false). true면 잠금화면 PC-ON 클릭 시 비밀번호 모달 표시. |
+| lock-policy API | `unlockPolicy.leaveSeatUnlockRequirePassword` | 동일. lock-policy 미사용 시 getPcOffWorkTime에서 내려주거나, config에서 강제 가능. |
+| config.json | `leaveSeatUnlockRequirePassword` | 서버에서 값을 주지 않을 때 이석 화면에서 비밀번호 모달을 띄울지 여부(true 시 모달 표시). |
+| config.json | `leaveSeatUnlockPassword` | 화면잠금 해제용 비밀번호(문자열). 설정 시 **서버 호출 없이** 입력값과 로컬 비교. 서버에 별도 API가 없을 때 사용. |
+| config.json | `leaveSeatUnlockVerifyUrl` | 원본 PHP 등 서버 검증 URL. 설정 시 POST(ServAreaID, UserID, PcOnPass)로 검증. 서버가 비밀번호를 저장·비교. |
+
+**검증 흐름:** `leaveSeatUnlockPassword` 설정 시 → 로컬 비교. 미설정 시 `leaveSeatUnlockVerifyUrl` → PHP 호출. 둘 다 없으면 `POST /verifyLeaveSeatUnlock.do` 호출(서버 미구현 시 404). 원본 WebView는 로그인 비밀번호로 검증(sendPcOnPass.php).
 
 ---
 

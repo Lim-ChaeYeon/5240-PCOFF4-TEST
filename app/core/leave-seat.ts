@@ -1,6 +1,8 @@
 /**
  * leave-seat.ts
- * 이석 감지·해제 정책 모듈
+ * 이석 감지·해제 정책 모듈 (단일 소스)
+ *
+ * 참고: 현재 앱에서는 import되지 않음. renderer(lock.js)가 동일 로직 calcLeaveSeatPolicy/checkIsBreakTime/formatDetectedAt 를 자체 구현해 사용. 정책 변경 시 두 곳 동기화 필요.
  *
  * 정책:
  * - screenType === "empty" → 이석 상태

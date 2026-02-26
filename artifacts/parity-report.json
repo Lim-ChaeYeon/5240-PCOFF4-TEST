@@ -1,8 +1,8 @@
 {
   "summary": {
-    "generatedAt": "2026-02-19T06:18:36.875Z",
-    "total": 10,
-    "passed": 10,
+    "generatedAt": "2026-02-26T07:11:44.713Z",
+    "total": 1,
+    "passed": 1,
     "failed": 0,
     "requiredFlows": [
       "Flow-01",
@@ -14,7 +14,8 @@
       "Flow-07",
       "Flow-08"
     ],
-    "coveredFlows": [
+    "coveredFlows": [],
+    "uncoveredFlows": [
       "Flow-01",
       "Flow-02",
       "Flow-03",
@@ -23,148 +24,21 @@
       "Flow-06",
       "Flow-07",
       "Flow-08"
-    ],
-    "uncoveredFlows": []
+    ]
   },
   "results": [
     {
-      "scenario": "login_success",
-      "flowId": "Flow-01",
+      "scenario": "leave_seat_unlock",
+      "flowId": "Flow-14",
       "requirementIds": [
-        "FR-01"
+        "FR-14"
       ],
       "expectedLogCodes": [
-        "LOGIN_SUCCESS"
-      ],
-      "success": true,
-      "details": "login success flow simulated",
-      "finishedAt": "2026-02-19T06:18:36.835Z"
-    },
-    {
-      "scenario": "lock_reason_input",
-      "flowId": "Flow-02",
-      "requirementIds": [
-        "FR-01"
-      ],
-      "expectedLogCodes": [
-        "LOCK_TRIGGERED"
-      ],
-      "success": true,
-      "details": "lock + reason input flow simulated",
-      "finishedAt": "2026-02-19T06:18:36.836Z"
-    },
-    {
-      "scenario": "update_success",
-      "flowId": "Flow-03",
-      "requirementIds": [
-        "FR-03"
-      ],
-      "expectedLogCodes": [
-        "UPDATE_FOUND",
-        "UPDATE_DOWNLOADED",
-        "UPDATE_APPLIED"
-      ],
-      "success": true,
-      "details": "silent update flow simulated",
-      "finishedAt": "2026-02-19T06:18:36.836Z"
-    },
-    {
-      "scenario": "update_failure_retry",
-      "flowId": "Flow-04",
-      "requirementIds": [
-        "FR-03"
-      ],
-      "expectedLogCodes": [
-        "UPDATE_FAILED"
-      ],
-      "success": true,
-      "details": "update failure retry flow simulated",
-      "finishedAt": "2026-02-19T06:18:36.836Z"
-    },
-    {
-      "scenario": "password_change_confirm",
-      "flowId": "Flow-05",
-      "requirementIds": [
-        "FR-04"
-      ],
-      "expectedLogCodes": [
-        "PASSWORD_CHANGE_DETECTED",
-        "PASSWORD_CONFIRM_DONE"
-      ],
-      "success": true,
-      "details": "password confirm-only policy simulated",
-      "finishedAt": "2026-02-19T06:18:36.836Z"
-    },
-    {
-      "scenario": "tamper_attempt",
-      "flowId": "Flow-06",
-      "requirementIds": [
-        "FR-07"
-      ],
-      "expectedLogCodes": [
-        "AGENT_TAMPER_DETECTED",
-        "AGENT_RECOVERED"
-      ],
-      "success": true,
-      "details": "tamper detection simulated, guard active: false, integrity valid: true",
-      "finishedAt": "2026-02-19T06:18:36.875Z"
-    },
-    {
-      "scenario": "offline_detected",
-      "flowId": "Flow-07",
-      "requirementIds": [
-        "FR-08"
-      ],
-      "expectedLogCodes": [
-        "CRASH_DETECTED",
-        "OFFLINE_DETECTED"
-      ],
-      "success": true,
-      "details": "offline/crash flow simulated, OFFLINE_DETECTED and CRASH_DETECTED logged",
-      "finishedAt": "2026-02-19T06:18:36.875Z"
-    },
-    {
-      "scenario": "installer_registry_sync",
-      "flowId": "Flow-08",
-      "requirementIds": [
-        "FR-09"
-      ],
-      "expectedLogCodes": [
-        "INSTALLER_REGISTRY_SYNC"
-      ],
-      "success": true,
-      "details": "installer registry created: deviceId=82f41194-7c45-4151-9cef-a71dcac858fe, syncStatus=failed",
-      "finishedAt": "2026-02-19T06:18:36.875Z"
-    },
-    {
-      "scenario": "leave_seat_reason_required",
-      "flowId": "Flow-02",
-      "requirementIds": [
-        "FR-11"
-      ],
-      "expectedLogCodes": [
-        "LEAVE_SEAT_DETECTED",
-        "LEAVE_SEAT_REASON_SUBMITTED",
         "LEAVE_SEAT_UNLOCK"
       ],
       "success": true,
-      "details": "leave seat reason required: detectedAt=10:30, reason=\"회의 참석\"",
-      "finishedAt": "2026-02-19T06:18:36.875Z"
-    },
-    {
-      "scenario": "leave_seat_break_exempt",
-      "flowId": "Flow-02b",
-      "requirementIds": [
-        "FR-11"
-      ],
-      "expectedLogCodes": [
-        "LEAVE_SEAT_DETECTED",
-        "LEAVE_SEAT_BREAK_EXEMPT",
-        "LEAVE_SEAT_UNLOCK"
-      ],
-      "success": true,
-      "details": "leave seat break exempt: isBreakTime=true, requireReason=false",
-      "finishedAt": "2026-02-19T06:18:36.875Z"
+      "details": "leave seat unlock (password verify → PC-ON) flow simulated; server verifyLeaveSeatUnlock.do required for E2E",
+      "finishedAt": "2026-02-26T07:11:44.709Z"
     }
   ]
 }

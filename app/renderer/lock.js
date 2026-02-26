@@ -257,11 +257,13 @@ function showLeaveSeatUnlockPasswordModal() {
   });
 }
 
-function showToast(text) {
+/** @param {string} text - 표시할 문구. @param {number} [durationMs] - 표시 시간(ms). 기본 2500, 안내 문구는 더 길게(예: 5000) */
+function showToast(text, durationMs) {
   if (!toastEl) return;
   toastEl.textContent = text;
   toastEl.classList.add("show");
-  setTimeout(() => toastEl.classList.remove("show"), 1400);
+  const ms = typeof durationMs === "number" && durationMs > 0 ? durationMs : 2500;
+  setTimeout(() => toastEl.classList.remove("show"), ms);
 }
 
 async function runAction(label, action) {
@@ -929,9 +931,26 @@ async function bootstrap() {
       if (!window.pcoffApi?.requestPcOnWithLeaveSeatUnlock) return showToast("preview 모드: 이석 해제");
       const result = await showLeaveSeatUnlockPasswordModal();
       if (!result) return;
-      await runAction("PC-ON (이석 해제)", () =>
-        window.pcoffApi.requestPcOnWithLeaveSeatUnlock(result.password, result.reason || undefined)
-      );
+      try {
+        const res = await window.pcoffApi.requestPcOnWithLeaveSeatUnlock(result.password, result.reason || undefined);
+        if (res?.success === false) {
+          showToast(res?.error || "비밀번호가 맞지 않습니다.");
+          return;
+        }
+        if (res?.stillLocked) {
+          showToast("이석 해제되었습니다. 근무 시간이 아니면 PC-ON이 반영되지 않을 수 있습니다.", 5500);
+        } else {
+          showToast("PC-ON (이석 해제) 완료", 3500);
+        }
+        if (window.pcoffApi?.getWorkTime) {
+          try {
+            await window.pcoffApi.getWorkTime();
+          } catch (_) {}
+        }
+      } catch (e) {
+        showToast("PC-ON (이석 해제) 오류");
+        console.error(e);
+      }
       return;
     }
 
@@ -939,9 +958,9 @@ async function bootstrap() {
     if (leaveSeatPolicy.requireReason) {
       const reason = await showLeaveSeatReasonModal(leaveSeatPolicy);
       if (reason == null || reason === "") return; // 취소
-      // 사유 포함하여 PC-ON 요청 (isLeaveSeat=true 플래그로 서버 로그 구분)
+      // 사유 포함하여 PC-ON 요청 (eventName=Lock Off - 이석해제, isLeaveSeat=true)
       await runAction("PC-ON (이석해제)", () =>
-        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off", reason, true)
+        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off - 이석해제", reason, true)
       );
       return;
     }
@@ -949,7 +968,7 @@ async function bootstrap() {
     // 이석 상태이지만 사유 면제 (휴게시간 중)
     if (leaveSeatPolicy.isLeaveSeat && leaveSeatPolicy.isBreakTime) {
       await runAction("PC-ON (휴게시간·사유면제)", () =>
-        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off", "", true)
+        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off - 이석해제", "", true)
       );
       return;
     }

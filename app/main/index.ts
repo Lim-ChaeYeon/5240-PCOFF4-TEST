@@ -140,6 +140,30 @@ function formatYmdHm(date: Date): string {
   return `${y}${m}${d}${h}${min}`;
 }
 
+/** Date → HHmm (4자, callCmmPcOnOffLogPrc emergencyYn 이석 시작/종료 시각용) */
+function formatHm(date: Date): string {
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${h}${min}`;
+}
+
+/**
+ * 이석 해제 시 emergencyYn 값 생성 (PC_OFF_AGENT_API §2.4).
+ * N/이석시간(시간단위,소수점)/이석시작(HHMM)/이석종료(HHMM)/이석중비근무시간
+ * leaveinputmethod: UI 미구현 시 0 전달.
+ */
+function buildLeaveSeatEmergencyYn(startAt: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - startAt.getTime();
+  const diffHours = Math.max(0, diffMs / (60 * 60 * 1000));
+  const diffStr = diffHours.toFixed(7).replace(/\.?0+$/, "") || "0";
+  const startHM = formatHm(startAt);
+  const endHM = formatHm(now);
+  // leaveSeatOffInputMath 1/3 사용자 입력 UI 미구현 시 0. 2는 근무중 이석시간 자동 → 0
+  const leaveinputmethod = "0";
+  return `N/${diffStr}/${startHM}/${endHM}/${leaveinputmethod}`;
+}
+
 /** YYYYMMDDHH24MI(12자) → Date. 백엔드 pcOnYmdTime/pcOffYmdTime 파싱용. */
 function parseYmdHm(value: string | undefined): Date | null {
   if (!value || String(value).length < 12) return null;
@@ -649,6 +673,35 @@ async function fetchLockScreenFromUrl(
   return out;
 }
 
+/**
+ * 원본 WebView sendPcOnPass.php 호출 (lockScreenApiUrl과 동일 방식).
+ * POST application/x-www-form-urlencoded: ServAreaID, UserID, PcOnPass.
+ * 응답: JSON 배열, result[0].code == 1 이면 성공.
+ */
+async function verifyLeaveSeatUnlockViaUrl(
+  url: string,
+  userServareaId: string,
+  userStaffId: string,
+  password: string
+): Promise<{ success: boolean; message?: string }> {
+  const body = new URLSearchParams({
+    ServAreaID: userServareaId,
+    UserID: userStaffId,
+    PcOnPass: password
+  }).toString();
+  const res = await fetch(url.trim(), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body
+  });
+  if (!res.ok) return { success: false, message: `요청 실패: ${res.status}` };
+  const json = (await res.json()) as Array<{ code?: number | string }> | { code?: number | string };
+  const first = Array.isArray(json) ? json[0] : json;
+  const code = first?.code;
+  if (code === 1 || code === "1") return { success: true };
+  return { success: false, message: "비밀번호가 맞지 않습니다." };
+}
+
 /** FR-14: 정책 객체를 WorkTimeResponse 형태로 병합 (lockScreen.screens, leaveSeatUnlockRequirePassword) */
 function mergeLockPolicyIntoData(data: WorkTimeResponse, policy: TenantLockPolicy): WorkTimeResponse {
   const merged = { ...data } as Record<string, unknown>;
@@ -981,8 +1034,26 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   void ensureLockWindowsForAllDisplays();
 }
 
-/** 로컬 이석 감지(유휴/절전) 시 잠금화면 표시 */
-function showLockForLocalLeaveSeat(detectedAt: Date, reason: LeaveSeatDetectedReason): void {
+/** 이미 잠금화면(종업/시업 전)이면 true. 이석은 잠금 해제된 상태에서만 체크. */
+function isAlreadyLockedByWorkHours(): boolean {
+  const base = resolveScreenType(
+    lastWorkTimeData as Partial<WorkTimeResponse> & { screenType?: string },
+    new Date(),
+    false
+  );
+  return base === "off" || base === "before";
+}
+
+/** 로컬 이석 감지(유휴/절전) 시 잠금화면 표시. 잠금 해제된 에이전트 화면에서만 동작. 임시연장·긴급사용/긴급해제 중에는 이석 체크 안 함. */
+function showLockForLocalLeaveSeat(
+  detectedAt: Date,
+  reason: LeaveSeatDetectedReason,
+  workSessionType?: "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE"
+): void {
+  if (isAlreadyLockedByWorkHours()) return;
+  if (currentMode === "TEMP_EXTEND" || currentMode === "EMERGENCY_USE" || currentMode === "EMERGENCY_RELEASE") return;
+  const wsType = workSessionType ?? "NORMAL";
+  void leaveSeatReporter.reportStart(reason, wsType, detectedAt);
   localLeaveSeatDetectedAt = detectedAt;
   localLeaveSeatReason = reason;
 
@@ -1730,8 +1801,7 @@ app.whenReady().then(async () => {
         });
         const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
           : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
-        void leaveSeatReporter.reportStart("INACTIVITY", wsType, detectedAt);
-        showLockForLocalLeaveSeat(detectedAt, "INACTIVITY");
+        showLockForLocalLeaveSeat(detectedAt, "INACTIVITY", wsType);
       },
       onSleepDetected: (detectedAt, sleepElapsedSeconds) => {
         void logger.write(LOG_CODES.LEAVE_SEAT_SLEEP_DETECTED, "INFO", {
@@ -1741,8 +1811,7 @@ app.whenReady().then(async () => {
         });
         const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
           : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
-        void leaveSeatReporter.reportStart("SLEEP_EXCEEDED", wsType, detectedAt);
-        showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED");
+        showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED", wsType);
       },
       onSleepEntered: () => void logger.write(LOG_CODES.SLEEP_ENTERED, "INFO", {}),
       onSleepResumed: () => void logger.write(LOG_CODES.SLEEP_RESUMED, "INFO", {})
@@ -1941,7 +2010,21 @@ ipcMain.handle("pcoff:logout", async () => {
 });
 const RECENT_WORKTIME_CACHE_MS = 2500;
 
+/** 이석 화면(screenType=empty)일 때 config.leaveSeatUnlockRequirePassword가 true면 비밀번호 모달 노출용으로 병합 */
+function applyLeaveSeatUnlockRequirePasswordFromConfig(
+  data: Record<string, unknown>,
+  config: { leaveSeatUnlockRequirePassword?: boolean }
+): void {
+  if (config.leaveSeatUnlockRequirePassword === true && (data.screenType ?? "") === "empty") {
+    data.leaveSeatUnlockRequirePassword = true;
+  }
+}
+
 ipcMain.handle("pcoff:getWorkTime", async () => {
+  const config = await readJson<{ leaveSeatUnlockRequirePassword?: boolean }>(
+    join(baseDir, PATHS.config),
+    {}
+  );
   const api = await getApiClient();
   if (!api) {
     const mockData = buildMockWorkTime() as Record<string, unknown>;
@@ -1949,6 +2032,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
       mockData.screenType = "empty";
       mockData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
     }
+    applyLeaveSeatUnlockRequirePasswordFromConfig(mockData, config);
     logLoadedConfig("근태정보 (getWorkTime IPC, mock)", { source: "mock", pcOnYn: mockData.pcOnYn, screenType: mockData.screenType });
     return { source: "mock", data: mockData };
   }
@@ -1960,6 +2044,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
       const merged = { ...lastWorkTimeData } as Record<string, unknown>;
       if (localLeaveSeatDetectedAt) merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
       merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
+      applyLeaveSeatUnlockRequirePasswordFromConfig(merged, config);
       return { source: "api", data: merged };
     }
   }
@@ -2000,6 +2085,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
         }
         // 서버 이석(screenType=empty) 반영: 주기 잠금 검사·checkLockAndShowLockWindow에서 사용하도록 lastWorkTimeData 갱신 (pcOffYmdTime/pcExCount는 로컬 유지)
         lastWorkTimeData = { ...merged };
+        applyLeaveSeatUnlockRequirePasswordFromConfig(merged, config);
         return { source: "api", data: merged };
       }
     }
@@ -2043,6 +2129,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     const merged = { ...data } as Record<string, unknown>;
     if (localLeaveSeatDetectedAt) merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
     merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
+    applyLeaveSeatUnlockRequirePasswordFromConfig(merged, config);
     return { source: "api", data: merged };
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "getPcOffWorkTime", error: String(error) });
@@ -2078,6 +2165,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     } catch {
       // ignore
     }
+    applyLeaveSeatUnlockRequirePasswordFromConfig(fallbackData, config);
     return { source: "fallback", data: fallbackData, error: String(error) };
   }
 });
@@ -2251,12 +2339,22 @@ ipcMain.handle(
   ): Promise<ActionResult> => {
     const api = await getApiClient();
     if (!api) return { source: "mock", success: true };
+    const eventName =
+      payload.tmckButnCd === "IN" && payload.isLeaveSeat
+        ? (payload.eventName ?? "Lock Off - 이석해제")
+        : (payload.eventName ?? (payload.tmckButnCd === "IN" ? "Lock Off" : "Lock On"));
+    const emergencyYn =
+      payload.tmckButnCd === "IN" &&
+      payload.isLeaveSeat &&
+      localLeaveSeatDetectedAt
+        ? buildLeaveSeatEmergencyYn(localLeaveSeatDetectedAt)
+        : "N";
     try {
       const data = await api.callCmmPcOnOffLogPrc({
         tmckButnCd: payload.tmckButnCd,
-        eventName: payload.eventName,
+        eventName,
         reason: payload.reason,
-        emergencyYn: "N"
+        emergencyYn
       });
       // PC-ON 시: 서버에 IN 기록 후 근태 갱신. 잠금 해제되면 에이전트 화면으로 전환, 여전히 잠금이면 stillLocked 반환(잠금화면에서 불가 메시지 표시)
       if (payload.tmckButnCd === "IN") {
@@ -2312,16 +2410,63 @@ ipcMain.handle(
   ): Promise<ActionResult> => {
     const api = await getApiClient();
     if (!api) return { source: "mock", success: false, error: "로그인 필요" };
-    try {
-      const verify = await api.verifyLeaveSeatUnlock(payload.password ?? "", payload.reason ?? "");
-      if (!verify.success) {
-        return { source: "api", success: false, error: verify.message ?? "비밀번호가 올바르지 않습니다." };
+    const config = await readJson<{
+      mockVerifyLeaveSeatUnlock?: boolean;
+      /** 화면잠금 해제용 비밀번호(로컬). 서버에 저장된 비밀번호로 검증할 땐 leaveSeatUnlockVerifyUrl 또는 .do 사용. */
+      leaveSeatUnlockPassword?: string;
+      /** 서버 검증 URL. 서버에 화면잠금 해제용 비밀번호가 저장되어 있으면 이 URL로 전송 후 서버가 저장값과 비교. */
+      leaveSeatUnlockVerifyUrl?: string;
+    }>(join(baseDir, PATHS.config), {});
+    const useMockVerify = config.mockVerifyLeaveSeatUnlock === true;
+    const configuredPassword = config.leaveSeatUnlockPassword?.trim();
+    const phpVerifyUrl = config.leaveSeatUnlockVerifyUrl?.trim();
+
+    if (useMockVerify) {
+      await logger.write(LOG_CODES.LEAVE_SEAT_UNLOCK, "INFO", {
+        mockVerify: true,
+        message: "config.mockVerifyLeaveSeatUnlock: 검증 API 생략, PC-ON 진행"
+      });
+    } else if (configuredPassword) {
+      // 로컬 config에만 비밀번호가 있을 때(서버 미사용): 설정값과 로컬 비교. 일반적으로는 서버 저장·검증 사용.
+      if (payload.password !== configuredPassword) {
+        return { source: "api", success: false, error: "비밀번호가 맞지 않습니다." };
       }
+    } else if (phpVerifyUrl) {
+      // 서버에 저장된 비밀번호로 검증: PHP가 입력값과 서버 저장값 비교 후 code 반환. UserID는 로그인 아이디(loginUserId).
+      const userDisplay = await getLoginUserDisplay(baseDir);
+      const userIdForPhp = userDisplay?.loginUserId ?? cachedUserStaffId;
+      const verify = await verifyLeaveSeatUnlockViaUrl(
+        phpVerifyUrl,
+        cachedUserServareaId,
+        userIdForPhp,
+        payload.password ?? ""
+      );
+      if (!verify.success) {
+        return { source: "api", success: false, error: verify.message ?? "비밀번호가 맞지 않습니다." };
+      }
+    } else {
+      try {
+        const verify = await api.verifyLeaveSeatUnlock(payload.password ?? "", payload.reason ?? "");
+        if (!verify.success) {
+          return { source: "api", success: false, error: verify.message ?? "비밀번호가 올바르지 않습니다." };
+        }
+      } catch (err) {
+        const errMsg = String(err);
+        if (errMsg.includes("404") || errMsg.includes("verifyLeaveSeatUnlock")) {
+          return { source: "api", success: false, error: "이석 해제 검증 API를 사용할 수 없습니다." };
+        }
+        throw err;
+      }
+    }
+    try {
+      const eventName = "Lock Off - 이석해제";
+      const emergencyYn =
+        localLeaveSeatDetectedAt ? buildLeaveSeatEmergencyYn(localLeaveSeatDetectedAt) : "N";
       const data = await api.callCmmPcOnOffLogPrc({
         tmckButnCd: "IN",
-        eventName: "Lock Off",
+        eventName,
         reason: payload.reason ?? "",
-        emergencyYn: "N"
+        emergencyYn
       });
       await logger.write(LOG_CODES.LEAVE_SEAT_UNLOCK, "INFO", {
         hasReason: Boolean(payload.reason?.trim()),
@@ -2350,13 +2495,15 @@ ipcMain.handle(
         showTrayInfoInCurrentWindow();
         return { source: "api", success: true, data };
       }
+      // 긴급사용 등 상태에서 이석 해제 후 서버가 아직 잠금을 유지해도, 잠금창을 닫고 작동정보로 전환해 사용자가 해제된 것처럼 보이도록 함
+      showTrayInfoInCurrentWindow();
       return { source: "api", success: true, data, stillLocked: true };
     } catch (error) {
-      const errMsg = String(error);
-      if (errMsg.includes("404") || errMsg.includes("verifyLeaveSeatUnlock")) {
-        return { source: "api", success: false, error: "이석 해제 검증 API를 사용할 수 없습니다." };
-      }
-      return { source: "fallback", success: false, error: errMsg };
+      await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", {
+        step: "requestPcOnWithLeaveSeatUnlock:callCmmPcOnOffLogPrc",
+        error: String(error)
+      });
+      return { source: "fallback", success: false, error: String(error) };
     }
   }
 );

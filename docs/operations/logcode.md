@@ -87,7 +87,7 @@ Electron 앱에서 사용하는 로그 코드 매핑.
 | Log Code | Description | 비고 |
 |----------|-------------|------|
 | LEAVE_SEAT_DETECTED | 이석 감지(화면 로드 시) | screenType=empty 시 잠금화면 진입 |
-| LEAVE_SEAT_UNLOCK | 이석 해제(PC-ON) | PC-ON 성공 시. 비밀번호 검증 경로 시 payload에 passwordVerified: true |
+| LEAVE_SEAT_UNLOCK | 이석 해제(PC-ON) | PC-ON 성공 시. callCmmPcOnOffLogPrc eventName=Lock Off - 이석해제, emergencyYn 이석 형식. mockVerifyLeaveSeatUnlock 시 검증 API 생략 |
 | LEAVE_SEAT_REASON_SUBMITTED | 이석 사유 입력 완료 | 사유 필수 시 모달에서 제출 |
 | LEAVE_SEAT_BREAK_EXEMPT | 휴게시간 이석 면제 | breakStartTime~breakEndTime 내 PC-ON |
 | LEAVE_SEAT_IDLE_DETECTED | Idle 기반 이석 감지 | powerMonitor.getSystemIdleTime() 초과(로컬) |

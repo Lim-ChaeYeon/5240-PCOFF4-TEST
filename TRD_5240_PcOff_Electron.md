@@ -262,6 +262,13 @@ node simulator run --scenario emergency_unlock
 
 이석 화면에 이석감지시각(`leaveDetectedAt`) 표시. 절전 초과 시 절전 시작시각으로 표기.
 
+### 9.5 적용 제외 조건 (PRD FR-11 정책)
+
+로컬 이석 감지 시 아래인 경우 잠금 화면을 띄우지 않음:
+* **이미 잠금(종업/시업 전)**: `resolveScreenType`이 off/before이면 이석(empty)으로 덮어쓰지 않음. `showLockForLocalLeaveSeat`에서 `isAlreadyLockedByWorkHours()`이면 return.
+* **임시연장·긴급사용·긴급해제 중**: `currentMode`가 TEMP_EXTEND, EMERGENCY_USE, EMERGENCY_RELEASE이면 이석 잠금 미표시.
+* **그 외(일반 해제 상태)**: 위가 아닐 때만 유휴/절전 초과 시 이석 잠금 표시.
+
 ---
 
 ## 10. Offline Recovery Lock Architecture (FR-17)

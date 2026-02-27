@@ -112,7 +112,112 @@ export class EmergencyUnlockManager {
   }
 
   /**
-   * 긴급해제 시도: 서버에 비밀번호 검증 후 결과 반환
+   * 긴급해제 시도: 원본 WebView와 동일하게 PHP(sendLockPass.php)로 비밀번호 검증
+   * POST application/x-www-form-urlencoded: ServAreaID, LockPass
+   * 응답: { result: 'success' } 이면 성공
+   */
+  async attemptViaPhp(
+    sendLockPassUrl: string,
+    servareaId: string,
+    password: string
+  ): Promise<{ success: boolean; message: string; remainingAttempts: number; lockedUntil?: string }> {
+    await this.logger.write(LOG_CODES.EMERGENCY_UNLOCK_ATTEMPT, "INFO", { source: "php" });
+
+    if (this.isLockedOut) {
+      const lockedUntil = this.state.lockedUntil!;
+      return {
+        success: false,
+        message: `시도 횟수 초과로 차단 중입니다. ${new Date(lockedUntil).toLocaleTimeString("ko-KR")}까지 대기해 주세요.`,
+        remainingAttempts: 0,
+        lockedUntil
+      };
+    }
+
+    const body = new URLSearchParams({
+      ServAreaID: servareaId,
+      LockPass: password
+    }).toString();
+
+    let json: { result?: string };
+    try {
+      const res = await fetch(sendLockPassUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        return {
+          success: false,
+          message: `PHP 요청 실패: ${res.status} ${res.statusText}`,
+          remainingAttempts: Math.max(0, this.maxFailures - this.state.failureCount)
+        };
+      }
+      try {
+        json = JSON.parse(text) as { result?: string };
+      } catch {
+        return {
+          success: false,
+          message: "PHP 응답 형식이 올바르지 않습니다.",
+          remainingAttempts: Math.max(0, this.maxFailures - this.state.failureCount)
+        };
+      }
+    } catch (err) {
+      return {
+        success: false,
+        message: `서버 통신 오류: ${String(err)}`,
+        remainingAttempts: Math.max(0, this.maxFailures - this.state.failureCount)
+      };
+    }
+
+    if (json.result === "success") {
+      await this.onSuccess();
+      return {
+        success: true,
+        message: "긴급해제 성공",
+        remainingAttempts: this.maxFailures
+      };
+    }
+
+    // 실패 처리 (동일한 lockout 로직)
+    this.state.failureCount += 1;
+    const remaining = Math.max(0, this.maxFailures - this.state.failureCount);
+
+    if (this.state.failureCount >= this.maxFailures) {
+      const lockedUntil = new Date(Date.now() + this.lockoutMs).toISOString();
+      this.state.lockedUntil = lockedUntil;
+      await this.persist();
+      await this.logger.write(LOG_CODES.EMERGENCY_UNLOCK_LOCKED, "WARN", {
+        failureCount: this.state.failureCount,
+        lockedUntil
+      });
+      setTimeout(async () => {
+        this.state.lockedUntil = null;
+        this.state.failureCount = 0;
+        await this.persist();
+      }, this.lockoutMs);
+      return {
+        success: false,
+        message: `비밀번호가 일치하지 않습니다. ${this.maxFailures}회 실패하여 ${Math.round(this.lockoutMs / 60000)}분간 차단됩니다.`,
+        remainingAttempts: 0,
+        lockedUntil
+      };
+    }
+
+    await this.persist();
+    await this.logger.write(LOG_CODES.EMERGENCY_UNLOCK_FAILED, "WARN", {
+      failureCount: this.state.failureCount,
+      remainingAttempts: remaining
+    });
+    return {
+      success: false,
+      message: `비밀번호가 일치하지 않습니다. (${remaining}회 남음)`,
+      remainingAttempts: remaining
+    };
+  }
+
+  /**
+   * 긴급해제 시도: 서버 API(callPcOffEmergencyUnlock.do)로 비밀번호 검증 후 결과 반환
    */
   async attempt(
     apiClient: PcOffApiClient,
@@ -135,9 +240,14 @@ export class EmergencyUnlockManager {
     try {
       response = await apiClient.callPcOffEmergencyUnlock({ password, reason });
     } catch (err) {
+      const errStr = String(err);
+      const is404 = /404|not found|Not Found/i.test(errStr);
+      const message = is404
+        ? "서버에 긴급해제 API가 등록되지 않았습니다. 관리자에게 문의하세요."
+        : `서버 통신 오류: ${errStr}`;
       return {
         success: false,
-        message: `서버 통신 오류: ${String(err)}`,
+        message,
         remainingAttempts: Math.max(0, this.maxFailures - this.state.failureCount)
       };
     }

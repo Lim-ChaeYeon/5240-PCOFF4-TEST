@@ -99,7 +99,11 @@ function coerceWorkTimeFromApi(data) {
     lockScreenOffLogo: data.lockScreenOffLogo ?? undefined,
     lockScreenLeaveBackground: data.lockScreenLeaveBackground ?? undefined,
     lockScreenLeaveLogo: data.lockScreenLeaveLogo ?? undefined,
-    leaveSeatUnlockRequirePassword: Boolean(data.leaveSeatUnlockRequirePassword)
+    // FR-14: 이석 화면(screenType=empty)일 때 값이 없으면 비밀번호 모달 기본 사용(기존 구현 동작)
+    leaveSeatUnlockRequirePassword:
+      data.leaveSeatUnlockRequirePassword !== undefined
+        ? Boolean(data.leaveSeatUnlockRequirePassword)
+        : ((data.screenType ?? "") === "empty")
   };
 }
 
@@ -573,12 +577,18 @@ function applyLockInfo(work) {
   else if (lockInfoEl) lockInfoEl.style.display = "";
 }
 
-// 보조 잠금창: 메인에서 동일 근태/배경 데이터 수신 후 적용 (주모니터와 동일 문구·배경)
+// 현재 근태/이석 정책 (bootstrap·onLockInitialWork에서 갱신, PC-ON 등 클릭 시 사용)
+let currentWork = null;
+let currentLeaveSeatPolicy = { isLeaveSeat: false, requireReason: false, isBreakTime: false, detectedAt: null };
+
+// 보조 잠금창: 메인에서 동일 근태/배경 데이터 수신 후 적용 (주모니터와 동일 문구·배경). 수신 시 currentWork/currentLeaveSeatPolicy 갱신해 PC-ON 분기(이석 비밀번호 등) 반영.
 if (typeof window !== "undefined" && window.pcoffApi?.onLockInitialWork) {
   window.pcoffApi.onLockInitialWork((data) => {
-    const work = coerceWorkTimeFromApi(data);
-    applyLockInfo(work);
-    applyButtonDisp(work);
+    currentWork = coerceWorkTimeFromApi(data);
+    currentLeaveSeatPolicy = calcLeaveSeatPolicy(currentWork);
+    if (extendCountEl) extendCountEl.textContent = String(currentWork.pcExCount ?? 0);
+    applyLockInfo(currentWork);
+    applyButtonDisp(currentWork);
   });
 }
 
@@ -657,16 +667,25 @@ function setupPasswordChangeListener() {
 const btnEmergencyUnlockEl = document.getElementById("btn-emergency-unlock");
 
 async function checkEmergencyUnlockEligibility() {
-  if (!window.pcoffApi?.getEmergencyUnlockEligibility || !btnEmergencyUnlockEl) return;
+  if (!btnEmergencyUnlockEl) return;
   try {
-    const elig = await window.pcoffApi.getEmergencyUnlockEligibility();
-    // 긴급해제 버튼은 항상 표시(긴급사용과 구분). 미설정 시 클릭하면 안내 메시지로 처리
-    btnEmergencyUnlockEl.style.display = "";
-    btnEmergencyUnlockEl.disabled = !elig.eligible;
-    btnEmergencyUnlockEl.title = elig.eligible ? "" : "관리자가 긴급해제를 설정한 경우에만 사용할 수 있습니다.";
+    if (window.pcoffApi?.getEmergencyUnlockEligibility) {
+      const elig = await window.pcoffApi.getEmergencyUnlockEligibility();
+      btnEmergencyUnlockEl.style.display = "";
+      // 잠금 해제 대기 중(시도 제한)일 때만 비활성화. 미설정(eligible false)이어도 클릭 가능하게 해 모달에서 안내
+      const inLockout = elig.isLockedOut && (elig.remainingLockoutMs ?? 0) > 0;
+      btnEmergencyUnlockEl.disabled = inLockout;
+      btnEmergencyUnlockEl.title = inLockout
+        ? `시도 제한으로 ${Math.ceil((elig.remainingLockoutMs ?? 0) / 60000)}분 후에 다시 시도할 수 있습니다.`
+        : (elig.eligible ? "" : "관리자가 긴급해제를 설정한 경우에만 사용할 수 있습니다.");
+    } else {
+      btnEmergencyUnlockEl.style.display = "";
+      btnEmergencyUnlockEl.disabled = false;
+      btnEmergencyUnlockEl.title = "";
+    }
   } catch {
     btnEmergencyUnlockEl.style.display = "";
-    btnEmergencyUnlockEl.disabled = true;
+    btnEmergencyUnlockEl.disabled = false;
     btnEmergencyUnlockEl.title = "긴급해제 사용 불가";
   }
 }
@@ -677,16 +696,21 @@ async function showEmergencyUnlockModal() {
   const hintEl = document.getElementById("emergency-unlock-hint");
   const btnCancel = document.getElementById("emergency-unlock-cancel");
   const btnConfirm = document.getElementById("emergency-unlock-confirm");
-  if (!overlay || !input) return;
+  if (!overlay || !input) {
+    showToast("잠금 해제 화면을 불러올 수 없습니다.");
+    return;
+  }
+
+  if (!window.pcoffApi?.requestEmergencyUnlock) {
+    showToast("긴급해제를 사용할 수 없습니다. 앱을 다시 시작해 보세요.");
+    return;
+  }
 
   if (window.pcoffApi?.getEmergencyUnlockEligibility) {
     const elig = await window.pcoffApi.getEmergencyUnlockEligibility();
-    if (!elig.eligible) {
-      showToast("긴급해제는 관리자가 설정한 경우에만 사용할 수 있습니다.");
-      return;
-    }
-    if (elig.isLockedOut && elig.remainingLockoutMs > 0) {
-      showToast(`시도 제한으로 ${Math.ceil(elig.remainingLockoutMs / 60000)}분 후에 다시 시도할 수 있습니다.`);
+    // 시도 제한(lockout) 중일 때만 모달 열기 차단. 미설정(eligible false)이어도 모달은 열고 확인 시 안내
+    if (elig.isLockedOut && (elig.remainingLockoutMs ?? 0) > 0) {
+      showToast(`시도 제한으로 ${Math.ceil((elig.remainingLockoutMs ?? 0) / 60000)}분 후에 다시 시도할 수 있습니다.`);
       return;
     }
   }
@@ -710,6 +734,7 @@ async function showEmergencyUnlockModal() {
       showToast("비밀번호를 입력해 주세요.");
       return;
     }
+    // 자격 검사로 막지 않고 항상 서버에 해제 요청. 실패 시 메시지는 result.message로 표시
     btnConfirm.disabled = true;
     btnConfirm.textContent = "확인 중...";
     try {
@@ -763,6 +788,30 @@ function setupEmergencyUnlockListeners() {
       showToast("긴급해제가 만료되어 잠금 상태로 전환됩니다.");
     });
   }
+}
+
+/** 긴급사용 버튼 클릭 — 스크립트 로드 시 등록해 bootstrap 완료 전에도 모달/피드백 표시 */
+function setupEmergencyUseListener() {
+  btnUseEl?.addEventListener("click", async () => {
+    if (!window.pcoffApi?.requestEmergencyUseStep1) {
+      showToast("긴급사용을 사용할 수 없습니다. 앱을 다시 시작해 보세요.");
+      return;
+    }
+    btnUseEl.disabled = true;
+    try {
+      const result = await window.pcoffApi.requestEmergencyUseStep1("긴급사용 요청");
+      if (result?.success && result?.serverPass != null) {
+        await showEmergencyReasonModal(result.serverPass);
+      } else {
+        showToast(result?.error || "인증번호 발송에 실패했습니다.");
+      }
+    } catch (e) {
+      showToast("인증번호 발송 중 오류가 발생했습니다.");
+      console.error(e);
+    } finally {
+      btnUseEl.disabled = false;
+    }
+  });
 }
 
 /* ──── FR-17: 오프라인 유예/잠금 UI ──── */
@@ -919,44 +968,39 @@ async function bootstrap() {
   applyLockInfo(work);
   applyButtonDisp(work);
 
-  // 이석 정책 계산 (사유 필수 여부 / 휴게시간 여부)
-  const leaveSeatPolicy = calcLeaveSeatPolicy(work);
+  // 이석 정책 계산 (사유 필수 여부 / 휴게시간 여부). PC-ON 등 클릭 시 사용할 currentWork/currentLeaveSeatPolicy 갱신
+  currentWork = work;
+  currentLeaveSeatPolicy = calcLeaveSeatPolicy(work);
 
   // 이석 상태일 때 UI 힌트 추가 (휴게시간 면제 안내)
-  if (leaveSeatPolicy.isLeaveSeat && leaveSeatPolicy.isBreakTime) {
+  if (currentLeaveSeatPolicy.isLeaveSeat && currentLeaveSeatPolicy.isBreakTime) {
     showToast("휴게시간 중: 사유 입력 없이 PC-ON 가능");
   }
 
   btnExtendEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestPcExtend) return showToast("preview 모드: 임시연장");
-    await runAction("임시연장", () => window.pcoffApi.requestPcExtend(work.pcOffYmdTime));
+    const w = currentWork || work;
+    await runAction("임시연장", () => window.pcoffApi.requestPcExtend(w.pcOffYmdTime));
   });
-  btnUseEl?.addEventListener("click", async () => {
-    if (!window.pcoffApi?.requestEmergencyUseStep1) {
-      showToast("preview 모드: 긴급사용");
-      return;
-    }
-    btnUseEl.disabled = true;
-    try {
-      const result = await window.pcoffApi.requestEmergencyUseStep1("긴급사용 요청");
-      if (result?.success && result?.serverPass != null) {
-        await showEmergencyReasonModal(result.serverPass);
-      } else {
-        showToast(result?.error || "인증번호 발송에 실패했습니다.");
-      }
-    } catch (e) {
-      showToast("인증번호 발송 중 오류가 발생했습니다.");
-      console.error(e);
-    } finally {
-      btnUseEl.disabled = false;
-    }
-  });
+  // 긴급사용 리스너는 setupEmergencyUseListener()에서 스크립트 로드 시 이미 등록됨
   btnPlayEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestPcOnOffLog) return showToast("preview 모드: PC-ON");
+    // PC-ON 클릭 시점에 최신 근태 조회해 이석·비밀번호 여부 판단 (bootstrap/onLockInitialWork 순서 이슈 회피)
+    let w = currentWork || work;
+    let policy = currentLeaveSeatPolicy;
+    if (window.pcoffApi?.getWorkTime) {
+      try {
+        const res = await window.pcoffApi.getWorkTime();
+        if (res?.data) {
+          w = coerceWorkTimeFromApi(res.data);
+          policy = calcLeaveSeatPolicy(w);
+        }
+      } catch (_) {}
+    }
 
-    // FR-14: 이석 상태이고 비밀번호 필수인 경우 → 비밀번호 모달 후 검증 PC-ON
-    if (leaveSeatPolicy.isLeaveSeat && work.leaveSeatUnlockRequirePassword) {
-      if (!window.pcoffApi?.requestPcOnWithLeaveSeatUnlock) return showToast("preview 모드: 이석 해제");
+    // FR-14: 이석 시 설정(leaveSeatUnlockRequirePassword)이 true이거나 미설정이면 비밀번호 모달 후 검증 PC-ON (false로 둔 경우만 스킵)
+    const needLeaveSeatPassword = policy.isLeaveSeat && (w.leaveSeatUnlockRequirePassword === true || (w.leaveSeatUnlockRequirePassword !== false && window.pcoffApi?.requestPcOnWithLeaveSeatUnlock));
+    if (needLeaveSeatPassword && window.pcoffApi?.requestPcOnWithLeaveSeatUnlock) {
       const result = await showLeaveSeatUnlockPasswordModal();
       if (!result) return;
       try {
@@ -983,8 +1027,8 @@ async function bootstrap() {
     }
 
     // 이석 상태이고 사유 입력이 필요한 경우 → 모달 표시
-    if (leaveSeatPolicy.requireReason) {
-      const reason = await showLeaveSeatReasonModal(leaveSeatPolicy);
+    if (policy.requireReason) {
+      const reason = await showLeaveSeatReasonModal(policy);
       if (reason == null || reason === "") return; // 취소
       // 사유 포함하여 PC-ON 요청 (eventName=Lock Off - 이석해제, isLeaveSeat=true)
       await runAction("PC-ON (이석해제)", () =>
@@ -994,7 +1038,7 @@ async function bootstrap() {
     }
 
     // 이석 상태이지만 사유 면제 (휴게시간 중)
-    if (leaveSeatPolicy.isLeaveSeat && leaveSeatPolicy.isBreakTime) {
+    if (policy.isLeaveSeat && policy.isBreakTime) {
       await runAction("PC-ON (휴게시간·사유면제)", () =>
         window.pcoffApi.requestPcOnOffLog("IN", "Lock Off - 이석해제", "", true)
       );
@@ -1008,14 +1052,13 @@ async function bootstrap() {
     if (!window.pcoffApi?.requestPcOnOffLog) return showToast("preview 모드: PC-OFF");
     await runAction("PC-OFF", () => window.pcoffApi.requestPcOnOffLog("OUT", "Lock On"));
   });
-  getAttendEl?.addEventListener("click", () => openAttendPanel(work));
+  getAttendEl?.addEventListener("click", () => openAttendPanel(currentWork || work));
   document.getElementById("close-attend")?.addEventListener("click", () => {
     if (attendPanelEl) attendPanelEl.classList.remove("active");
   });
 
   setupPasswordChangeListener();
   setupConnectivityListener();
-  setupEmergencyUnlockListeners();
   void checkEmergencyUnlockEligibility();
 
   // 잠금화면 로그
@@ -1023,14 +1066,18 @@ async function bootstrap() {
     window.pcoffApi.logEvent("LOCK_SCREEN_OPENED", { screenType: work.screenType });
 
     // 이석 상태이면 LEAVE_SEAT_DETECTED 로그
-    if (leaveSeatPolicy.isLeaveSeat) {
+    if (currentLeaveSeatPolicy.isLeaveSeat) {
       window.pcoffApi.logEvent("LEAVE_SEAT_DETECTED", {
-        detectedAt: leaveSeatPolicy.detectedAt,
-        requireReason: leaveSeatPolicy.requireReason,
-        isBreakTime: leaveSeatPolicy.isBreakTime
+        detectedAt: currentLeaveSeatPolicy.detectedAt,
+        requireReason: currentLeaveSeatPolicy.requireReason,
+        isBreakTime: currentLeaveSeatPolicy.isBreakTime
       });
     }
   }
 }
+
+// 긴급해제·긴급사용 클릭 리스너는 스크립트 로드 시 바로 등록(bootstrap 완료 전에도 클릭 반응)
+setupEmergencyUnlockListeners();
+setupEmergencyUseListener();
 
 void bootstrap();

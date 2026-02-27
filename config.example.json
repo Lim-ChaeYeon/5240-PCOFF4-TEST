@@ -1,11 +1,13 @@
 {
   "apiBaseUrl": "https://api.5240.cloud",
   "lockScreenApiUrl": "https://5240.work/LockScreen/getScreenInfo.php",
+  "sendLockPassUrl": "https://5240.work/Includes/sendLockPass.php",
   "lockScreen": {
     "before": { "title": "", "message": "", "backgroundUrl": "", "logoUrl": "" },
     "off": { "title": "", "message": "", "backgroundUrl": "", "logoUrl": "" },
     "leave": { "title": "", "message": "", "backgroundUrl": "", "logoUrl": "" }
   },
+  "leaveSeatUnlockRequirePassword": true,
   "leaveSeatUnlockPassword": "",
   "leaveSeatUnlockVerifyUrl": "",
   "mockVerifyLeaveSeatUnlock": false

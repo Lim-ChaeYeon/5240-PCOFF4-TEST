@@ -266,7 +266,7 @@ node simulator run --scenario emergency_unlock
 
 로컬 이석 감지 시 아래인 경우 잠금 화면을 띄우지 않음:
 * **이미 잠금(종업/시업 전)**: `resolveScreenType`이 off/before이면 이석(empty)으로 덮어쓰지 않음. `showLockForLocalLeaveSeat`에서 `isAlreadyLockedByWorkHours()`이면 return.
-* **임시연장·긴급사용·긴급해제 중**: `currentMode`가 TEMP_EXTEND, EMERGENCY_USE, EMERGENCY_RELEASE이면 이석 잠금 미표시.
+* **긴급해제 중**: `currentMode`가 EMERGENCY_RELEASE일 때만 이석 잠금 미표시. 임시연장(TEMP_EXTEND)·긴급사용(EMERGENCY_USE) 중에는 이석 체크 적용.
 * **그 외(일반 해제 상태)**: 위가 아닐 때만 유휴/절전 초과 시 이석 잠금 표시.
 
 ---

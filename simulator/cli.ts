@@ -15,7 +15,8 @@ const ALL_SCENARIOS: ScenarioName[] = [
   "offline_detected",
   "installer_registry_sync",
   "leave_seat_reason_required",
-  "leave_seat_break_exempt"
+  "leave_seat_break_exempt",
+  "leave_seat_unlock"
 ];
 
 async function main(): Promise<void> {

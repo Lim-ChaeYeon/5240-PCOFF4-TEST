@@ -1,6 +1,6 @@
 # Parity Summary
 
-- Generated: 2026-02-26T07:11:44.713Z
-- Result: 1/1 passed
-- Flow Coverage: 0/8
-- Uncovered Flows: Flow-01, Flow-02, Flow-03, Flow-04, Flow-05, Flow-06, Flow-07, Flow-08
+- Generated: 2026-02-27T02:52:50.837Z
+- Result: 11/11 passed
+- Flow Coverage: 8/8
+- Uncovered Flows: none

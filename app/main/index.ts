@@ -200,7 +200,10 @@ function buildMockWorkTime(): WorkTimeResponse {
     pcExCount: 1,
     pcExMaxCount: 3,
     pcExTime: 30,
-    pcoffEmergencyYesNo: "YES"
+    pcoffEmergencyYesNo: "YES",
+    // FR-15: mock에서 긴급해제 버튼이 동작하도록 플래그 추가 (서버 연동 시에는 getPcOffWorkTime 응답에서 내려줌)
+    emergencyUnlockUseYn: "YES",
+    emergencyUnlockPasswordSetYn: "Y"
   };
 }
 
@@ -373,9 +376,17 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   });
 }
 
-/** 보조 잠금창 전부 닫기 (해제/로그인 전환 시 호출). destroy()로 강제 제거(close 방지 우회). */
+/** 보조 잠금창 전부 닫기 (해제/로그인 전환 시 호출). destroy()로 강제 제거(close 방지 우회).
+ * Windows: 풀스크린 해제 후 hide()로 즉시 화면에서 제거한 뒤 destroy()하여 보조 모니터에 잠금이 남는 현상 방지. */
 function closeAllLockWindows(): void {
   for (const win of lockWindowsByDisplayId.values()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.setFullScreen(false);
+      win.hide();
+    } catch {
+      // 이미 파괴 중이거나 오류 시 무시
+    }
     if (!win.isDestroyed()) win.destroy();
   }
   lockWindowsByDisplayId.clear();
@@ -908,7 +919,9 @@ async function createLockWindow(): Promise<void> {
   if (api) {
     try {
       const data = await fetchWorkTimeWithLockScreen(api);
-      lastWorkTimeData = data as Record<string, unknown>;
+      const dataRecord = data as Record<string, unknown>;
+      preserveLocalPcExCountIfHigher(dataRecord);
+      lastWorkTimeData = dataRecord;
       applyResolvedScreenType(lastWorkTimeData);
       lastWorkTimeFetchedAt = new Date().toISOString();
       leaveSeatDetector.updatePolicy({
@@ -1002,7 +1015,9 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   if (api) {
     try {
       const data = await fetchWorkTimeWithLockScreen(api);
-      lastWorkTimeData = data as Record<string, unknown>;
+      const dataRecord = data as Record<string, unknown>;
+      preserveLocalPcExCountIfHigher(dataRecord);
+      lastWorkTimeData = dataRecord;
       applyResolvedScreenType(lastWorkTimeData);
       lastWorkTimeFetchedAt = new Date().toISOString();
       leaveSeatDetector.updatePolicy({
@@ -1272,7 +1287,9 @@ async function refreshWorkTimeFromApi(): Promise<void> {
   if (!api) return;
   try {
     const data = await api.getPcOffWorkTime();
-    lastWorkTimeData = data as unknown as Record<string, unknown>;
+    const dataRecord = data as unknown as Record<string, unknown>;
+    preserveLocalPcExCountIfHigher(dataRecord);
+    lastWorkTimeData = dataRecord;
     applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     leaveSeatDetector.updatePolicy({
@@ -1286,6 +1303,19 @@ async function refreshWorkTimeFromApi(): Promise<void> {
     });
   } catch (e) {
     console.info("[PCOFF] refreshWorkTimeFromApi 실패:", String(e));
+  }
+}
+
+/**
+ * 서버가 pcExCount를 0으로 주어도, 이미 사용한 연장 횟수는 로컬 lastWorkTimeData를 유지해 덮어쓰지 않음.
+ * API 응답 객체를 인자로 받아 필요 시 해당 객체를 mutate함. (createLockWindow, showLockInWindow, isLockRequired, getWorkTime 등에서 사용)
+ */
+function preserveLocalPcExCountIfHigher(apiData: Record<string, unknown>): void {
+  const apiExCount = Number(apiData.pcExCount ?? 0);
+  const localExCount = Number(lastWorkTimeData?.pcExCount ?? 0);
+  if (localExCount >= 1 && apiExCount < localExCount) {
+    apiData.pcExCount = lastWorkTimeData!.pcExCount;
+    apiData.pcOffYmdTime = lastWorkTimeData!.pcOffYmdTime;
   }
 }
 
@@ -1308,7 +1338,9 @@ async function isLockRequired(): Promise<boolean> {
     if (api) {
       try {
         const data = await api.getPcOffWorkTime();
-        lastWorkTimeData = data as unknown as Record<string, unknown>;
+        const dataRecord = data as unknown as Record<string, unknown>;
+        preserveLocalPcExCountIfHigher(dataRecord);
+        lastWorkTimeData = dataRecord;
         applyResolvedScreenType(lastWorkTimeData);
         lastWorkTimeFetchedAt = new Date().toISOString();
         leaveSeatDetector.updatePolicy({
@@ -1376,7 +1408,9 @@ async function isLockRequired(): Promise<boolean> {
   }
   try {
     const data = await api.getPcOffWorkTime();
-    lastWorkTimeData = data as unknown as Record<string, unknown>;
+    const dataRecord = data as unknown as Record<string, unknown>;
+    preserveLocalPcExCountIfHigher(dataRecord);
+    lastWorkTimeData = dataRecord;
     applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     leaveSeatDetector.updatePolicy({
@@ -1799,6 +1833,8 @@ app.whenReady().then(async () => {
     cachedUserServareaId = config?.userServareaId ?? "";
     cachedUserStaffId = config?.userStaffId ?? "";
 
+    // 재시작 시 임시연장 복원을 먼저 적용해 lastWorkTimeData·currentMode 설정 후 잠금 검사 (복원 전에 checkLock이 돌면 연장 횟수 0으로 보임)
+    await restoreTempExtendState();
     startLockCheckInterval();
     leaveSeatReporter.start();
 
@@ -2106,7 +2142,11 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
       }
     }
 
-    lastWorkTimeData = data as Record<string, unknown>;
+    // 서버가 pcExCount를 0으로 주어도, 오늘 이미 사용한 연장 횟수는 로컬에서 유지 (잠금화면 배지·작동정보 일치)
+    const dataRecord = data as Record<string, unknown>;
+    preserveLocalPcExCountIfHigher(dataRecord);
+
+    lastWorkTimeData = dataRecord;
     applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     leaveSeatDetector.updatePolicy({
@@ -2189,9 +2229,13 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
 ipcMain.handle("pcoff:requestPcExtend", async (_event, payload: { pcOffYmdTime?: string }): Promise<ActionResult> => {
   const api = await getApiClient();
   if (!api) return { source: "mock", success: true };
+  const maxCount = Number(lastWorkTimeData?.pcExMaxCount ?? 0);
+  const currentCount = Number(lastWorkTimeData?.pcExCount ?? 0);
+  if (maxCount > 0 && currentCount >= maxCount) {
+    return { source: "api", success: false, error: "임시연장 가능 횟수를 모두 사용했습니다." };
+  }
   try {
     const pcOffYmdTime = payload.pcOffYmdTime ?? buildMockWorkTime().pcOffYmdTime ?? "";
-    const currentCount = Number(lastWorkTimeData?.pcExCount ?? 0);
     const extCount = currentCount + 1;
     const data = await api.callPcOffTempDelay(pcOffYmdTime, extCount);
     console.info("[PCOFF] callPcOffTempDelay 응답:", JSON.stringify(data));
@@ -2395,7 +2439,9 @@ ipcMain.handle(
           localLeaveSeatReason = null;
         }
         const fresh = await api.getPcOffWorkTime();
-        lastWorkTimeData = fresh as unknown as Record<string, unknown>;
+        const freshRecord = fresh as unknown as Record<string, unknown>;
+        preserveLocalPcExCountIfHigher(freshRecord);
+        lastWorkTimeData = freshRecord;
         applyResolvedScreenType(lastWorkTimeData);
         lastWorkTimeFetchedAt = new Date().toISOString();
         const pcOnT = parseYmdHm(fresh.pcOnYmdTime);
@@ -2499,7 +2545,9 @@ ipcMain.handle(
         localLeaveSeatReason = null;
       }
       const fresh = await api.getPcOffWorkTime();
-      lastWorkTimeData = fresh as unknown as Record<string, unknown>;
+      const freshRecord = fresh as unknown as Record<string, unknown>;
+      preserveLocalPcExCountIfHigher(freshRecord);
+      lastWorkTimeData = freshRecord;
       applyResolvedScreenType(lastWorkTimeData);
       lastWorkTimeFetchedAt = new Date().toISOString();
       const pcOnT = parseYmdHm(fresh.pcOnYmdTime);
@@ -2610,8 +2658,22 @@ ipcMain.handle("pcoff:refreshMyAttendance", async () => {
         await logger.write(LOG_CODES.TRAY_ATTENDANCE_REFRESHED, "INFO", {});
         return merged;
       }
+      // 연장 만료 시각이 지났거나 파싱 실패해도, 이미 사용한 연장 횟수(pcExCount)는 로컬 값을 유지해 UI에서 0으로 덮어쓰지 않음
+      const localCount = Number(lastWorkTimeData.pcExCount ?? 0);
+      if (localCount >= 1) {
+        const merged = { ...data } as Record<string, unknown>;
+        merged.pcExCount = lastWorkTimeData.pcExCount;
+        merged.pcOffYmdTime = lastWorkTimeData.pcOffYmdTime ?? merged.pcOffYmdTime;
+        merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
+        lastWorkTimeData = { ...merged };
+        lastWorkTimeFetchedAt = new Date().toISOString();
+        await logger.write(LOG_CODES.TRAY_ATTENDANCE_REFRESHED, "INFO", {});
+        return merged;
+      }
     }
-    lastWorkTimeData = data as unknown as Record<string, unknown>;
+    const dataRecord = data as unknown as Record<string, unknown>;
+    preserveLocalPcExCountIfHigher(dataRecord);
+    lastWorkTimeData = dataRecord;
     applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
     await logger.write(LOG_CODES.TRAY_ATTENDANCE_REFRESHED, "INFO", {});

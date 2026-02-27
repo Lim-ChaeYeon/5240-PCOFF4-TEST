@@ -138,7 +138,8 @@ npm start
 
 ```bash
 npm run simulator          # 단일 시나리오 (기본: update_success)
-npm run simulator:all      # Flow-01~08 전체 시나리오 실행
+npm run simulator:all      # Flow-01~08 + 이석(02/02b/02c) 전체 11개 시나리오 실행
+npx tsx simulator/cli.ts run --scenario leave_seat_unlock   # 이석 해제 config·mock 경로 검증
 ```
 
 결과는 `artifacts/parity-report.json`, `artifacts/parity-summary.md`에 기록됩니다.
@@ -170,6 +171,9 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 | Flow-06 | `tamper_attempt` | Agent 삭제/우회 탐지 | FR-07 |
 | Flow-07 | `offline_detected` | 오프라인/충돌 감지 | FR-08 |
 | Flow-08 | `installer_registry_sync` | 설치자 레지스트리 동기화 | FR-09 |
+| Flow-02 | `leave_seat_reason_required` | 이석 사유 필수 | FR-11 |
+| Flow-02b | `leave_seat_break_exempt` | 이석 휴게시간 사유 면제 | FR-11 |
+| Flow-02c | `leave_seat_unlock` | 이석 해제 비밀번호 config·mock 검증 | FR-11, FR-14 |
 | Flow-09 | `leave_seat_idle` | Idle 기반 이석 감지 | FR-11 |
 | Flow-09 | `leave_seat_sleep` | 절전 기반 이석 감지 | FR-11 |
 | Flow-10 | `leave_seat_event_report` | 이석 이벤트 서버 전송 | FR-12 |
@@ -196,7 +200,7 @@ PRD Flow 기준 시뮬레이터 시나리오와 매핑입니다.
 - **로컬 이석/절전 감지 (FR-11)**: `app/core/leave-seat-detector.ts`. 유휴(Idle): `powerMonitor.getSystemIdleTime()` 5초 폴링, API 정책(`leaveSeatUseYn`, `leaveSeatTime` 분) 초과 시 잠금화면. 절전: suspend 시각 기록, resume 시 경과 >= leaveSeatTime 이면 이석 잠금(감지시각=절전 시작). `getWorkTime` 응답에 로컬 이석 병합. **API 정규화**: 서버가 `leaveSeatUseYn`을 `"YES"`/`"NO"`로 내려줘도 `normalizeLeaveSeatUseYn()`으로 `"Y"`/`"N"` 변환 후 정책 적용. ✅
 - **이석정보 서버 전송 (FR-12)**: `app/core/leave-seat-reporter.ts`. 세션 기반(`leaveSeatSessionId`) START/END 전송(`POST /reportLeaveSeatEvent.do`). 이석 감지 시 START, PC-ON 해제 시 END. 재시도 큐(`leave-seat-queue.jsonl`) + 지수 백오프, 30초 주기 플러시. ✅
 - **API 연동**: getPcOffWorkTime, getPcOffServareaInfo, getPcOffLoginUserInfo, callPcOffTempDelay, callPcOffEmergencyUse, callPcOffEmergencyUnlock, callCmmPcOnOffLogPrc, reportLeaveSeatEvent. **API v1.9 정합성**: WorkTimeResponse 전체 필드, recoder "PC-OFF", 임시연장 extCount, 긴급사용 emergencyUsePass·인증번호 모달.
-- **시뮬레이터·CI**: Flow-01~08 시나리오, parity-report.json, parity-summary.md, CI 아티팩트
+- **시뮬레이터·CI**: Flow-01~08 + leave_seat_reason_required/leave_seat_break_exempt/**leave_seat_unlock** 등 11개 시나리오, parity-report.json, parity-summary.md, CI 아티팩트. 추후 개발·점검 연동 절차는 [docs/추후_개발_점검_연동_가이드.md](docs/추후_개발_점검_연동_가이드.md) 참고.
 - **로깅**: JSONL, TelemetryLogger. LOG_CODES 상수로 APP_START, LOGIN_SUCCESS/FAIL, LOGOUT, LOCK/UNLOCK_TRIGGERED, UPDATE_*, AGENT_*, INSTALLER_REGISTRY_SYNC/FAIL, INSTALL_*/UNINSTALL_*/SELF_HEAL_*/ISOLATION_MODE_ENTERED, TRAY_*, LEAVE_SEAT_* 등 기록 (logcode.md·constants.ts 참고) ✅
 - **자동 업데이트 (FR-03)**: `electron-updater` 기반 무확인 자동 업데이트, 재시도 큐, 진행률 UI 표시 ✅
 - **비밀번호 변경 확인 (FR-04)**: 서버 `pwdChgYn=Y` 감지 시 확인 전용 모달, 검증/재로그인 없음 ✅

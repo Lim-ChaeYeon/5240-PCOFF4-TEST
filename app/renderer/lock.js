@@ -418,6 +418,12 @@ function setVisible(el, visible) {
   el.classList.toggle("hidden", !visible);
 }
 
+/**
+ * 잠금화면 버튼 노출 조건
+ * - 임시연장: screenType "off"(종업)일 때만. 시업·종업 시각 이후이거나 pcExMaxCount > 0이면 표시.
+ * - 긴급사용: screenType이 before/empty가 아니고, pcoffEmergencyYesNo === "YES"일 때.
+ * - 긴급해제: 항상 DOM에 표시. eligible 여부는 getEmergencyUnlockEligibility(서버 emergencyUnlockUseYn=YES, emergencyUnlockPasswordSetYn=Y)로 활성/비활성만 구분.
+ */
 function applyButtonDisp(work) {
   const now = new Date();
   const startTime = parseYmdHm(work.pcOnYmdTime);
@@ -428,7 +434,12 @@ function applyButtonDisp(work) {
       setVisible(btnExtendEl, false);
       break;
     case "off":
-      setVisible(btnExtendEl, Boolean(startTime && offTime && startTime <= now && offTime <= now));
+      // 종업 화면: 시업·종업 시각이 있고 현재가 종업 시각 이후이면 표시. 또는 임시연장 가능 횟수가 있으면 표시(시간 파싱 실패/데이터 부재 시에도 버튼 노출)
+      // 단, pcExCount >= pcExMaxCount이면 임시연장 횟수 소진 → 버튼 숨김 (API: pcExCount < pcExMaxCount일 때만 호출)
+      const timeOk = Boolean(startTime && offTime && startTime <= now && offTime <= now);
+      const maxCount = Number(work.pcExMaxCount ?? 0);
+      const hasQuota = maxCount > 0 && Number(work.pcExCount ?? 0) < maxCount;
+      setVisible(btnExtendEl, (timeOk || maxCount > 0) && hasQuota);
       break;
     case "empty":
       setVisible(btnExtendEl, false);
@@ -649,19 +660,36 @@ async function checkEmergencyUnlockEligibility() {
   if (!window.pcoffApi?.getEmergencyUnlockEligibility || !btnEmergencyUnlockEl) return;
   try {
     const elig = await window.pcoffApi.getEmergencyUnlockEligibility();
-    btnEmergencyUnlockEl.style.display = elig.eligible ? "" : "none";
+    // 긴급해제 버튼은 항상 표시(긴급사용과 구분). 미설정 시 클릭하면 안내 메시지로 처리
+    btnEmergencyUnlockEl.style.display = "";
+    btnEmergencyUnlockEl.disabled = !elig.eligible;
+    btnEmergencyUnlockEl.title = elig.eligible ? "" : "관리자가 긴급해제를 설정한 경우에만 사용할 수 있습니다.";
   } catch {
-    btnEmergencyUnlockEl.style.display = "none";
+    btnEmergencyUnlockEl.style.display = "";
+    btnEmergencyUnlockEl.disabled = true;
+    btnEmergencyUnlockEl.title = "긴급해제 사용 불가";
   }
 }
 
-function showEmergencyUnlockModal() {
+async function showEmergencyUnlockModal() {
   const overlay = document.getElementById("emergency-unlock-modal");
   const input = document.getElementById("emergency-unlock-password");
   const hintEl = document.getElementById("emergency-unlock-hint");
   const btnCancel = document.getElementById("emergency-unlock-cancel");
   const btnConfirm = document.getElementById("emergency-unlock-confirm");
   if (!overlay || !input) return;
+
+  if (window.pcoffApi?.getEmergencyUnlockEligibility) {
+    const elig = await window.pcoffApi.getEmergencyUnlockEligibility();
+    if (!elig.eligible) {
+      showToast("긴급해제는 관리자가 설정한 경우에만 사용할 수 있습니다.");
+      return;
+    }
+    if (elig.isLockedOut && elig.remainingLockoutMs > 0) {
+      showToast(`시도 제한으로 ${Math.ceil(elig.remainingLockoutMs / 60000)}분 후에 다시 시도할 수 있습니다.`);
+      return;
+    }
+  }
 
   input.value = "";
   if (hintEl) { hintEl.style.display = "none"; hintEl.textContent = ""; }

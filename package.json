@@ -1,6 +1,6 @@
 {
   "name": "pcoff-electron-agent",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "5240 PcOff Agent Electron scaffold",
   "repository": {
@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.preload.json",
     "simulator": "tsx simulator/cli.ts run --scenario update_success",
     "simulator:all": "tsx simulator/cli.ts run-all",
+    "check:temp-extend": "node scripts/check-temp-extend-reflect.mjs",
     "start": "npm run build && electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",

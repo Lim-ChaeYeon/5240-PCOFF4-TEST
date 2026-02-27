@@ -188,9 +188,13 @@ function applyButtonDisp(work) {
     case "before":
       setVisible(btnExtendEl, false);
       break;
-    case "off":
-      setVisible(btnExtendEl, Boolean(startTime && offTime && startTime <= now && offTime <= now));
+    case "off": {
+      const timeOk = Boolean(startTime && offTime && startTime <= now && offTime <= now);
+      const maxCount = Number(work.pcExMaxCount ?? 0);
+      const hasQuota = maxCount > 0 && Number(work.pcExCount ?? 0) < maxCount;
+      setVisible(btnExtendEl, timeOk && hasQuota);
       break;
+    }
     case "empty":
       setVisible(btnExtendEl, false);
       setVisible(btnUseEl, false);

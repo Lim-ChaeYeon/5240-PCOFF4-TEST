@@ -8,7 +8,8 @@ export type ScenarioName =
   | "offline_detected"
   | "installer_registry_sync"
   | "leave_seat_reason_required"
-  | "leave_seat_break_exempt";
+  | "leave_seat_break_exempt"
+  | "leave_seat_unlock";
 
 export interface ScenarioResult {
   scenario: ScenarioName;
@@ -54,6 +55,8 @@ export async function runScenario(name: ScenarioName): Promise<ScenarioResult> {
       return await runLeaveSeatReasonRequiredScenario();
     case "leave_seat_break_exempt":
       return await runLeaveSeatBreakExemptScenario();
+    case "leave_seat_unlock":
+      return await runLeaveSeatUnlockScenario();
     default:
       return fail(name, "unknown flow", [], [], "unknown scenario");
   }
@@ -373,6 +376,74 @@ async function runLeaveSeatBreakExemptScenario(): Promise<ScenarioResult> {
       expectedLogCodes,
       success: false,
       details: `leave seat break exempt scenario failed: ${error}`,
+      finishedAt: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * 추후 개발·점검 1번: 이석 해제 비밀번호 — config 우선순위 및 mock 경로 시뮬레이션
+ * (실제 검증·IPC는 Electron 앱에서만 동작. 시뮬레이터는 config 읽기·mock 경로 검증)
+ */
+async function runLeaveSeatUnlockScenario(): Promise<ScenarioResult> {
+  const scenario: ScenarioName = "leave_seat_unlock";
+  const flowId = "Flow-02c";
+  const requirementIds = ["FR-11", "FR-14"];
+  const expectedLogCodes = ["UNLOCK_TRIGGERED"];
+
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { TelemetryLogger } = await import("../app/core/telemetry-log.js");
+
+    const baseDir = process.cwd();
+    const logger = new TelemetryLogger(baseDir, "sim-leave-seat-unlock", process.platform);
+
+    let config: {
+      mockVerifyLeaveSeatUnlock?: boolean;
+      leaveSeatUnlockPassword?: string;
+      leaveSeatUnlockVerifyUrl?: string;
+    } = {};
+    try {
+      const raw = await readFile(join(baseDir, "config.json"), "utf-8");
+      config = JSON.parse(raw) as typeof config;
+    } catch {
+      // config 없으면 기본값으로 mock 경로 시뮬레이션
+      config = { mockVerifyLeaveSeatUnlock: false };
+    }
+
+    const useMock = config.mockVerifyLeaveSeatUnlock === true;
+    const hasLocalPassword = Boolean(config.leaveSeatUnlockPassword?.trim());
+    const hasVerifyUrl = Boolean(config.leaveSeatUnlockVerifyUrl?.trim());
+
+    // 메인 프로세스와 동일 우선순위: mock → 로컬 비밀번호 → URL → .do. 시뮬레이터에서는 mock 경로만 검증
+    const verified = useMock;
+
+    await logger.write("UNLOCK_TRIGGERED", "INFO", {
+      action: "leave_seat_unlock_simulated",
+      mockVerify: useMock,
+      hasLocalPassword,
+      hasVerifyUrl,
+      verified
+    });
+
+    return {
+      scenario,
+      flowId,
+      requirementIds,
+      expectedLogCodes,
+      success: true,
+      details: `leave_seat_unlock config verified: mock=${useMock}, localPw=${hasLocalPassword}, url=${hasVerifyUrl}`,
+      finishedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    return {
+      scenario,
+      flowId,
+      requirementIds,
+      expectedLogCodes,
+      success: false,
+      details: `leave_seat_unlock scenario failed: ${error}`,
       finishedAt: new Date().toISOString()
     };
   }

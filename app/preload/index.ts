@@ -87,6 +87,7 @@ const api = {
       source: "api" | "mock" | "fallback";
       data: Record<string, unknown>;
       error?: string;
+      networkFailure?: boolean;
     }>,
   /** 긴급사용 OTP 발송 대상. lastWorkTimeData 또는 config에서 반환. getPcOffWorkTime에 필드 없을 때 config로 조직장 수신 적용 */
   getEmergencyOtpSendTo: () =>
@@ -261,7 +262,10 @@ const api = {
       callback(data);
     ipcRenderer.on("pcoff:connectivity-changed", handler);
     return () => ipcRenderer.removeListener("pcoff:connectivity-changed", handler);
-  }
+  },
+  /** FR-17: 복구 전 사용 — 30분간 잠금화면 해제 후 재잠금 */
+  requestOfflineGraceUse: () =>
+    ipcRenderer.invoke("pcoff:requestOfflineGraceUse") as Promise<{ success: boolean; durationMin: number }>
 };
 
 contextBridge.exposeInMainWorld("pcoffApi", api);

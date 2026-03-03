@@ -143,6 +143,96 @@
         font-size: 10px;
         font-weight: bold;
       }
+      .test-mode-hint {
+        font-size: 12px;
+        color: #ffc107;
+        margin-right: 8px;
+      }
+      .test-mode-hint.hidden { display: none; }
+      .test-mode-drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 280px;
+        max-width: 100%;
+        background: rgba(18, 18, 22, 0.98);
+        border-left: 1px solid var(--line);
+        z-index: 1000;
+        overflow-y: auto;
+        padding: 16px;
+        display: none;
+      }
+      .test-mode-drawer.open { display: block; }
+      .test-mode-drawer h2 {
+        font-size: 14px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 0 0 12px 0;
+      }
+      .test-mode-drawer .drawer-section {
+        margin-bottom: 20px;
+      }
+      .test-mode-drawer label {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .test-mode-drawer select {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 13px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.06);
+        color: var(--text);
+        margin-bottom: 12px;
+      }
+      .test-mode-drawer .preset-btn {
+        display: block;
+        width: 100%;
+        padding: 8px 12px;
+        font-size: 12px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.06);
+        color: var(--text);
+        cursor: pointer;
+        margin-bottom: 6px;
+        text-align: left;
+        transition: all 0.2s;
+      }
+      .test-mode-drawer .preset-btn:hover {
+        background: rgba(255,255,255,0.1);
+      }
+      .test-mode-drawer input[type="text"],
+      .test-mode-drawer input[type="number"] {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 13px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.06);
+        color: var(--text);
+        margin-bottom: 10px;
+        box-sizing: border-box;
+      }
+      .test-mode-drawer .apply-overrides-btn {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 13px;
+        border-radius: 8px;
+        border: 1px solid var(--accent);
+        background: rgba(93, 160, 255, 0.15);
+        color: var(--accent);
+        cursor: pointer;
+        margin-top: 8px;
+      }
+      .test-mode-drawer .apply-overrides-btn:hover {
+        background: rgba(93, 160, 255, 0.25);
+      }
     </style>
   </head>
   <body>
@@ -157,6 +247,7 @@
             </div>
           </div>
           <div class="top-actions">
+            <span id="test-mode-hint" class="test-mode-hint hidden" aria-live="polite">테스트 모드 ON (Ctrl+Shift+T로 해제)</span>
             <span id="user-display" class="user-display"></span>
             <span id="app-version" class="version-badge"></span>
             <span id="current-mode" class="mode-badge normal">
@@ -251,6 +342,84 @@
     </main>
 
     <div id="toast" class="toast"></div>
+
+    <!-- 테스트 모드 Drawer: 핫키(Ctrl+Shift+T)로 ON 시에만 표시 -->
+    <aside id="test-mode-drawer" class="test-mode-drawer" aria-hidden="true">
+      <h2>테스트 모드 설정</h2>
+      <p style="font-size: 11px; color: var(--muted); margin-bottom: 12px;">Ctrl+Shift+T (Mac: Cmd+Shift+T)로 ON/OFF</p>
+      <div class="drawer-section">
+        <label for="test-force-screen">강제 화면 타입</label>
+        <select id="test-force-screen">
+          <option value="AUTO">AUTO</option>
+          <option value="BEFORE">시업(BEFORE)</option>
+          <option value="OFF">종업(OFF)</option>
+          <option value="EMPTY">이석(EMPTY)</option>
+        </select>
+        <label for="test-force-mode">강제 동작 모드</label>
+        <select id="test-force-mode">
+          <option value="AUTO">AUTO</option>
+          <option value="NORMAL">일반</option>
+          <option value="TEMP_EXTEND">임시연장</option>
+          <option value="EMERGENCY_USE">긴급사용</option>
+          <option value="EMERGENCY_RELEASE">긴급해제</option>
+        </select>
+      </div>
+      <div class="drawer-section">
+        <h2>시간·근태 값 입력</h2>
+        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">입력 후 [값 적용]으로 동작 여부 테스트</p>
+        <label for="test-pcOnYmdTime">시업 시간 (YYYYMMDDHHmm 12자리)</label>
+        <input type="text" id="test-pcOnYmdTime" placeholder="202602270830" maxlength="12" inputmode="numeric" pattern="[0-9]*" />
+        <label for="test-pcOffYmdTime">종업 시간 (YYYYMMDDHHmm 12자리)</label>
+        <input type="text" id="test-pcOffYmdTime" placeholder="202602271830" maxlength="12" inputmode="numeric" pattern="[0-9]*" />
+        <label for="test-pcExCount">임시연장 사용 횟수</label>
+        <input type="number" id="test-pcExCount" min="0" placeholder="0" />
+        <label for="test-pcExMaxCount">임시연장 최대 횟수</label>
+        <input type="number" id="test-pcExMaxCount" min="0" placeholder="3" />
+        <label for="test-pcExTime">임시연장 1회 분</label>
+        <input type="number" id="test-pcExTime" min="0" placeholder="30" />
+        <label for="test-leaveSeatUseYn">이석 사용 (Y/N)</label>
+        <select id="test-leaveSeatUseYn">
+          <option value="">—</option>
+          <option value="Y">Y</option>
+          <option value="N">N</option>
+        </select>
+        <label for="test-leaveSeatTime">이석 임계 시간(분)</label>
+        <input type="number" id="test-leaveSeatTime" min="0" placeholder="10" />
+        <label for="test-leaveSeatReasonYn">이석 사유 여부 (YES/NO)</label>
+        <select id="test-leaveSeatReasonYn">
+          <option value="">—</option>
+          <option value="YES">YES</option>
+          <option value="NO">NO</option>
+        </select>
+        <label for="test-leaveSeatReasonManYn">이석 사유 필수 (YES/NO)</label>
+        <select id="test-leaveSeatReasonManYn">
+          <option value="">—</option>
+          <option value="YES">YES</option>
+          <option value="NO">NO</option>
+        </select>
+        <label for="test-pcoffEmergencyYesNo">긴급사용 허용 (YES/NO)</label>
+        <select id="test-pcoffEmergencyYesNo">
+          <option value="">—</option>
+          <option value="YES">YES</option>
+          <option value="NO">NO</option>
+        </select>
+        <button type="button" id="test-apply-overrides" class="apply-overrides-btn">값 적용</button>
+      </div>
+      <div class="drawer-section">
+        <h2>프리셋</h2>
+        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">프리셋 클릭 시 폼만 채워짐. [시작] 클릭 시 적용·잠금화면 실행</p>
+        <button type="button" class="preset-btn" data-preset="before">시업 잠금 재현</button>
+        <button type="button" class="preset-btn" data-preset="off">종업 잠금 재현</button>
+        <button type="button" class="preset-btn" data-preset="empty_reason_required">이석 잠금 (사유필수)</button>
+        <button type="button" class="preset-btn" data-preset="empty_reason_exempt">이석 잠금 (사유면제)</button>
+        <button type="button" class="preset-btn" data-preset="mode_normal">모드: 일반</button>
+        <button type="button" class="preset-btn" data-preset="mode_temp_extend">모드: 임시연장</button>
+        <button type="button" class="preset-btn" data-preset="mode_emergency_use">모드: 긴급사용</button>
+        <button type="button" class="preset-btn" data-preset="mode_emergency_release">모드: 긴급해제</button>
+        <button type="button" class="preset-btn" data-preset="reset">초기화</button>
+        <button type="button" id="test-start-btn" class="apply-overrides-btn" style="margin-top: 14px; background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #4caf50;">시작</button>
+      </div>
+    </aside>
 
     <script type="module" src="./main-info.js"></script>
   </body>

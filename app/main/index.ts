@@ -41,7 +41,7 @@ import {
   syncInstallerRegistry
 } from "../core/installer-registry.js";
 import { LeaveSeatReporter } from "../core/leave-seat-reporter.js";
-import { readJson } from "../core/storage.js";
+import { readJson, writeJson } from "../core/storage.js";
 
 /** 개발 시: 프로젝트 디렉터리, 설치 앱: userData(설치 앱 전용 상태·로그 분리) */
 let baseDir = process.cwd();
@@ -105,9 +105,24 @@ function invalidateRuntimeConfigCache(): void {
   }
 }
 
-/** 테스트 모드: 활성 시 설정된 오버라이드로 시업/종업/이석 등 재현 (에이전트 화면에서 핫키·토글로 활성) */
+/** config.allowTestMode === false 이면 테스트 모드 비활성(핫키·API 모두 무시). 기본 true */
+async function getAllowTestMode(): Promise<boolean> {
+  try {
+    const cfg = await readJson<{ allowTestMode?: boolean }>(join(baseDir, PATHS.config), {});
+    return cfg.allowTestMode !== false;
+  } catch {
+    return true;
+  }
+}
+
+/** 테스트 모드: 활성 시 설정된 오버라이드로 시업/종업/이석 등 재현 (에이전트 화면에서 핫키로만 활성, 트레이 메뉴에는 노출 안 함) */
 let testModeEnabled = false;
 let testModeOverrides: Record<string, unknown> = {};
+type TestForceScreenType = "AUTO" | "BEFORE" | "OFF" | "EMPTY";
+type TestForceOperationMode = "AUTO" | OperationMode;
+let testModeForceScreenType: TestForceScreenType = "AUTO";
+let testModeForceOperationMode: TestForceOperationMode = "AUTO";
+let testModeBypassApi = true;
 
 /** 테스트 오버라이드를 base에 병합. base는 변경하지 않고 새 객체 반환 */
 function mergeTestOverrides(base: Record<string, unknown>): Record<string, unknown> {
@@ -119,8 +134,72 @@ function mergeTestOverrides(base: Record<string, unknown>): Record<string, unkno
   return merged;
 }
 
+/** 테스트 모드용 근태 데이터 1곳 생성. forceScreenType 적용, AUTO면 resolveScreenType 사용 */
+function getTestModeWorkData(): Record<string, unknown> {
+  const base = Object.keys(lastWorkTimeData).length > 0 ? lastWorkTimeData : (buildMockWorkTime() as Record<string, unknown>);
+  const merged = mergeTestOverrides(base);
+  if (testModeForceScreenType && testModeForceScreenType !== "AUTO") {
+    merged.screenType = testModeForceScreenType.toLowerCase();
+  } else {
+    applyResolvedScreenType(merged);
+  }
+  if (localLeaveSeatDetectedAt) {
+    applyLocalLeaveSeatToMerged(merged);
+  }
+  return merged;
+}
+
+interface TestModeStateFile {
+  testMode?: {
+    enabled?: boolean;
+    bypassApi?: boolean;
+    forceScreenType?: string;
+    forceOperationMode?: string;
+    overrides?: Record<string, unknown>;
+  };
+}
+
+async function loadTestModeState(): Promise<void> {
+  try {
+    const path = join(baseDir, PATHS.testModeState);
+    const data = await readJson<TestModeStateFile>(path, {});
+    const tm = data.testMode;
+    if (!tm) return;
+    // 프로그램 시작 시에는 항상 테스트 모드 해제 (enabled는 로드하지 않음)
+    if (typeof tm.bypassApi === "boolean") testModeBypassApi = tm.bypassApi;
+    if (tm.forceScreenType === "AUTO" || tm.forceScreenType === "BEFORE" || tm.forceScreenType === "OFF" || tm.forceScreenType === "EMPTY") {
+      testModeForceScreenType = tm.forceScreenType;
+    }
+    if (tm.forceOperationMode === "AUTO" || tm.forceOperationMode === "NORMAL" || tm.forceOperationMode === "TEMP_EXTEND" || tm.forceOperationMode === "EMERGENCY_USE" || tm.forceOperationMode === "EMERGENCY_RELEASE") {
+      testModeForceOperationMode = tm.forceOperationMode as TestForceOperationMode;
+    }
+    if (tm.overrides && typeof tm.overrides === "object") testModeOverrides = { ...tm.overrides };
+  } catch {
+    // ignore
+  }
+}
+
+async function saveTestModeState(): Promise<void> {
+  try {
+    const path = join(baseDir, PATHS.testModeState);
+    await writeJson(path, {
+      testMode: {
+        enabled: testModeEnabled,
+        bypassApi: testModeBypassApi,
+        forceScreenType: testModeForceScreenType,
+        forceOperationMode: testModeForceOperationMode,
+        overrides: testModeOverrides
+      }
+    });
+  } catch {
+    // ignore
+  }
+}
+
 /** 로컬 이석 감지(유휴/절전)로 잠금된 경우: 감지 시각·사유. PC-ON 해제 시 클리어 */
 let localLeaveSeatDetectedAt: Date | null = null;
+/** 이석 감지 구간 종료 시각 (유휴: detectedAt+idleSeconds, 절전: detectedAt+sleepElapsed). 표시용 "몇시~몇시 사이" */
+let localLeaveSeatDetectedAtEnd: Date | null = null;
 let localLeaveSeatReason: LeaveSeatDetectedReason | null = null;
 const leaveSeatDetector = new LeaveSeatDetector();
 
@@ -128,6 +207,16 @@ const leaveSeatDetector = new LeaveSeatDetector();
 function applyResolvedScreenType(work: Record<string, unknown>): void {
   if (Object.keys(work).length === 0) return;
   work.screenType = resolveScreenType(work, new Date(), !!localLeaveSeatDetectedAt);
+}
+
+/** 로컬 이석 감지 시 병합 객체에 구간 시각·화면 타입 반영. leaveSeatOffInputMath(0/1/2/3)는 서버 값 유지. */
+function applyLocalLeaveSeatToMerged(merged: Record<string, unknown>): void {
+  if (!localLeaveSeatDetectedAt) return;
+  merged.screenType = "empty";
+  merged.leaveSeatDetectedAtStart = formatYmdHm(localLeaveSeatDetectedAt);
+  if (localLeaveSeatDetectedAtEnd) {
+    merged.leaveSeatDetectedAtEnd = formatYmdHm(localLeaveSeatDetectedAtEnd);
+  }
 }
 
 const machine = new FeatureStateMachine();
@@ -169,17 +258,18 @@ function formatHm(date: Date): string {
 /**
  * 이석 해제 시 emergencyYn 값 생성 (PC_OFF_AGENT_API §2.4).
  * N/이석시간(시간단위,소수점)/이석시작(HHMM)/이석종료(HHMM)/이석중비근무시간
- * leaveinputmethod: UI 미구현 시 0 전달.
+ * leaveinputmethod: 0=근무이석, 1+=비근무이석. leaveSeatOffInputMath=3일 때 UI에서 선택값 전달.
  */
-function buildLeaveSeatEmergencyYn(startAt: Date): string {
+function buildLeaveSeatEmergencyYn(startAt: Date, leaveSeatOffInputValue?: number): string {
   const now = new Date();
   const diffMs = now.getTime() - startAt.getTime();
   const diffHours = Math.max(0, diffMs / (60 * 60 * 1000));
   const diffStr = diffHours.toFixed(7).replace(/\.?0+$/, "") || "0";
   const startHM = formatHm(startAt);
   const endHM = formatHm(now);
-  // leaveSeatOffInputMath 1/3 사용자 입력 UI 미구현 시 0. 2는 근무중 이석시간 자동 → 0
-  const leaveinputmethod = "0";
+  const leaveinputmethod = leaveSeatOffInputValue !== undefined && leaveSeatOffInputValue !== null
+    ? String(leaveSeatOffInputValue)
+    : "0";
   return `N/${diffStr}/${startHM}/${endHM}/${leaveinputmethod}`;
 }
 
@@ -588,6 +678,17 @@ function attachWindowHotkeys(win: BrowserWindow): void {
  */
 function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
   if (isolationModeActive) return;
+  // 테스트 모드에서 잠금 해제 시 테스트 모드 자동 OFF → 재잠금 무한루프 방지 (다음 잠금 판정은 API 기준)
+  if (testModeEnabled && currentScreen === "lock") {
+    testModeEnabled = false;
+    testModeForceScreenType = "AUTO";
+    testModeForceOperationMode = "AUTO";
+    testModeOverrides = {};
+    lastWorkTimeFetchedAt = null;
+    void saveTestModeState();
+    broadcastTestModeChanged();
+    if (logger) void logger.write(LOG_CODES.TEST_MODE_DISABLED, "INFO", { reason: "unlock" });
+  }
   currentScreen = "tray-info";
   closeAllLockWindows();
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -814,9 +915,11 @@ async function verifyLeaveSeatUnlockViaUrl(
   return { success: false, message: "비밀번호가 맞지 않습니다." };
 }
 
-/** lock-initial-work 전송용 페이로드. lastWorkTimeData에 config.emergencyOtpSendTo가 없으면 config에서 병합 (조직장 수신 메시지 적용) */
+/** lock-initial-work 전송용 페이로드. 테스트 모드 시 getTestModeWorkData 기준, 아니면 lastWorkTimeData. config.emergencyOtpSendTo 병합 (조직장 수신 메시지 적용) */
 async function getLockInitialWorkPayload(): Promise<Record<string, unknown>> {
-  const payload = { ...lastWorkTimeData } as Record<string, unknown>;
+  const payload = testModeEnabled
+    ? { ...getTestModeWorkData() }
+    : ({ ...lastWorkTimeData } as Record<string, unknown>);
   if (payload.emergencyOtpSendTo === "MANAGER" || payload.emergencyOtpSendTo === "SELF") return payload;
   const config = await readJson<{ emergencyOtpSendTo?: "SELF" | "MANAGER"; pcoff?: { emergencyOtpSendTo?: "SELF" | "MANAGER" } }>(
     join(baseDir, PATHS.config),
@@ -825,7 +928,7 @@ async function getLockInitialWorkPayload(): Promise<Record<string, unknown>> {
   const val = config.emergencyOtpSendTo ?? config.pcoff?.emergencyOtpSendTo;
   if (val === "MANAGER" || val === "SELF") {
     payload.emergencyOtpSendTo = val;
-    (lastWorkTimeData as Record<string, unknown>).emergencyOtpSendTo = val;
+    if (!testModeEnabled) (lastWorkTimeData as Record<string, unknown>).emergencyOtpSendTo = val;
   }
   return payload;
 }
@@ -1068,8 +1171,7 @@ async function createLockWindow(): Promise<void> {
   }
   // 이석 감지로 연 잠금창이면 fetch 실패 여부와 관계없이 이석 화면(empty)으로 고정, config 기준 비밀번호·설정된 이석 잠금화면 문구 반영
   if (localLeaveSeatDetectedAt) {
-    lastWorkTimeData.screenType = "empty";
-    lastWorkTimeData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+    applyLocalLeaveSeatToMerged(lastWorkTimeData as Record<string, unknown>);
     const config = await readJson<{
       leaveSeatUnlockRequirePassword?: boolean;
       lockScreen?: { leave?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string } };
@@ -1213,8 +1315,7 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   }
   // 이석 감지로 연 잠금창이면 fetch 실패 여부와 관계없이 이석 화면(empty)으로 고정, config 기준 비밀번호·설정된 이석 잠금화면 문구 반영
   if (localLeaveSeatDetectedAt) {
-    lastWorkTimeData.screenType = "empty";
-    lastWorkTimeData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+    applyLocalLeaveSeatToMerged(lastWorkTimeData as Record<string, unknown>);
     const config = await readJson<{
       leaveSeatUnlockRequirePassword?: boolean;
       lockScreen?: { leave?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string } };
@@ -1285,7 +1386,8 @@ function isAlreadyLockedByWorkHours(): boolean {
 function showLockForLocalLeaveSeat(
   detectedAt: Date,
   reason: LeaveSeatDetectedReason,
-  workSessionType?: "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE"
+  workSessionType?: "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE",
+  detectedAtEnd?: Date
 ): void {
   if (currentMode === "EMERGENCY_RELEASE") return;
   // 임시연장·긴급사용 중에는 resolveScreenType이 서버 기준이라 off로 나올 수 있음 → 이석 체크는 적용하므로 여기서는 스킵하지 않음
@@ -1293,6 +1395,7 @@ function showLockForLocalLeaveSeat(
   const wsType = workSessionType ?? "NORMAL";
   void leaveSeatReporter.reportStart(reason, wsType, detectedAt);
   localLeaveSeatDetectedAt = detectedAt;
+  localLeaveSeatDetectedAtEnd = detectedAtEnd ?? detectedAt;
   localLeaveSeatReason = reason;
 
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1566,6 +1669,13 @@ function preserveLocalPcExCountIfHigher(apiData: Record<string, unknown>): void 
 async function isLockRequired(): Promise<boolean> {
   // FR-15: 긴급해제 활성 중이면 잠금 스킵
   if (emergencyUnlockManager?.isActive) return false;
+
+  // 테스트 모드: 강제 화면 타입·오버라이드만으로 잠금 여부 판단
+  if (testModeEnabled) {
+    const work = getTestModeWorkData();
+    const st = String(work.screenType ?? "").toLowerCase();
+    return st === "before" || st === "off" || st === "empty";
+  }
 
   // 긴급사용(EMERGENCY_USE) 중: 서버 근태 갱신 후, 긴급사용 종료 시각(emergencyEndDate)이 있으면 그 시각 전까지 잠금 스킵; 없으면 구간 동안 재잠금 안 함
   if (currentMode === "EMERGENCY_USE") {
@@ -1850,6 +1960,7 @@ app.whenReady().then(async () => {
   try {
     mkdirSync(join(baseDir, PATHS.logsDir), { recursive: true });
   } catch { /* ignore */ }
+  await loadTestModeState();
   if (app.isPackaged) {
     const userConfigPath = join(baseDir, "config.json");
     const bundledConfigPath = join(process.resourcesPath, "config.json");
@@ -2075,6 +2186,17 @@ app.whenReady().then(async () => {
     ["CommandOrControl+Shift+L", () => void doGlobalLogout()],
     ["CommandOrControl+Shift+I", () => showTrayInfoInCurrentWindow()],
     ["CommandOrControl+Shift+K", () => void createLockWindow()],
+    ["CommandOrControl+Shift+T", () => {
+      void getAllowTestMode().then((allowed) => {
+        if (!allowed) return;
+        testModeEnabled = !testModeEnabled;
+        if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+        void saveTestModeState().then(() => {
+          if (logger) void logger.write(testModeEnabled ? LOG_CODES.TEST_MODE_ENABLED : LOG_CODES.TEST_MODE_DISABLED, "INFO", { source: "hotkey" });
+          broadcastTestModeChanged();
+        });
+      });
+    }],
     ["Ctrl+Shift+Q", () => {
       isForceQuit = true;
       app.quit();
@@ -2142,9 +2264,10 @@ app.whenReady().then(async () => {
           idleSeconds,
           leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
         });
+        const detectedAtEnd = new Date(detectedAt.getTime() + idleSeconds * 1000);
         const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
           : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
-        showLockForLocalLeaveSeat(detectedAt, "INACTIVITY", wsType);
+        showLockForLocalLeaveSeat(detectedAt, "INACTIVITY", wsType, detectedAtEnd);
       },
       onSleepDetected: (detectedAt, sleepElapsedSeconds) => {
         void logger.write(LOG_CODES.LEAVE_SEAT_SLEEP_DETECTED, "INFO", {
@@ -2152,9 +2275,10 @@ app.whenReady().then(async () => {
           sleepElapsedSeconds,
           leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
         });
+        const detectedAtEnd = new Date(detectedAt.getTime() + sleepElapsedSeconds * 1000);
         const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
           : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
-        showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED", wsType);
+        showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED", wsType, detectedAtEnd);
       },
       onSleepEntered: () => void logger.write(LOG_CODES.SLEEP_ENTERED, "INFO", {}),
       onSleepResumed: () => void logger.write(LOG_CODES.SLEEP_RESUMED, "INFO", {})
@@ -2407,13 +2531,8 @@ ipcMain.handle("pcoff:getEmergencyOtpSendTo", async () => {
 
 ipcMain.handle("pcoff:getWorkTime", async () => {
   const config = await readJson<ConfigForLeave>(join(baseDir, PATHS.config), {});
-  if (testModeEnabled && Object.keys(testModeOverrides).length > 0) {
-    const base = Object.keys(lastWorkTimeData).length > 0 ? lastWorkTimeData : (buildMockWorkTime() as Record<string, unknown>);
-    const merged = mergeTestOverrides(base);
-    if (localLeaveSeatDetectedAt) {
-      merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
-      merged.screenType = "empty";
-    }
+  if (testModeEnabled) {
+    const merged = getTestModeWorkData();
     applyLockScreenLeaveFromConfig(merged, config);
     applyLeaveSeatUnlockRequirePasswordFromConfig(merged, config);
     applyEmergencyOtpSendToFromConfig(merged, config);
@@ -2423,8 +2542,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
   if (!api) {
     const mockData = buildMockWorkTime() as Record<string, unknown>;
     if (localLeaveSeatDetectedAt) {
-      mockData.screenType = "empty";
-      mockData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+      applyLocalLeaveSeatToMerged(mockData);
       applyLockScreenLeaveFromConfig(mockData, config);
     }
     applyLeaveSeatUnlockRequirePasswordFromConfig(mockData, config);
@@ -2439,8 +2557,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     if (age >= 0 && age < RECENT_WORKTIME_CACHE_MS) {
       const merged = { ...lastWorkTimeData } as Record<string, unknown>;
       if (localLeaveSeatDetectedAt) {
-        merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
-        merged.screenType = "empty";
+        applyLocalLeaveSeatToMerged(merged);
         applyLockScreenLeaveFromConfig(merged, config);
       } else {
         merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
@@ -2474,8 +2591,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
         merged.pcOffYmdTime = lastWorkTimeData.pcOffYmdTime;
         merged.pcExCount = lastWorkTimeData.pcExCount;
         if (localLeaveSeatDetectedAt) {
-          merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
-          merged.screenType = "empty";
+          applyLocalLeaveSeatToMerged(merged);
           applyLockScreenLeaveFromConfig(merged, config);
         } else {
           merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
@@ -2539,8 +2655,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
 
     const merged = { ...data } as Record<string, unknown>;
     if (localLeaveSeatDetectedAt) {
-      merged.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
-      merged.screenType = "empty";
+      applyLocalLeaveSeatToMerged(merged);
       applyLockScreenLeaveFromConfig(merged, config);
     } else {
       merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
@@ -2554,8 +2669,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     if (!isHttpError) void offlineManager.reportApiFailure("api");
     const fallbackData = buildMockWorkTime() as Record<string, unknown>;
     if (localLeaveSeatDetectedAt) {
-      fallbackData.screenType = "empty";
-      fallbackData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+      applyLocalLeaveSeatToMerged(fallbackData);
     }
     // API 실패 시에도 config.json 잠금화면 문구 적용
     try {
@@ -2758,7 +2872,7 @@ ipcMain.handle(
   "pcoff:requestPcOnOffLog",
   async (
     _event,
-    payload: { tmckButnCd: "IN" | "OUT"; eventName?: string; reason?: string; isLeaveSeat?: boolean }
+    payload: { tmckButnCd: "IN" | "OUT"; eventName?: string; reason?: string; isLeaveSeat?: boolean; leaveSeatOffInputValue?: number }
   ): Promise<ActionResult> => {
     const api = await getApiClient();
     if (!api) return { source: "mock", success: true };
@@ -2770,7 +2884,7 @@ ipcMain.handle(
       payload.tmckButnCd === "IN" &&
       payload.isLeaveSeat &&
       localLeaveSeatDetectedAt
-        ? buildLeaveSeatEmergencyYn(localLeaveSeatDetectedAt)
+        ? buildLeaveSeatEmergencyYn(localLeaveSeatDetectedAt, payload.leaveSeatOffInputValue)
         : "N";
     try {
       const data = await api.callCmmPcOnOffLogPrc({
@@ -2799,6 +2913,7 @@ ipcMain.handle(
           });
           await leaveSeatReporter.reportEnd(payload.reason);
           localLeaveSeatDetectedAt = null;
+          localLeaveSeatDetectedAtEnd = null;
           localLeaveSeatReason = null;
         }
         const fresh = await api.getPcOffWorkTime();
@@ -2831,7 +2946,7 @@ ipcMain.handle(
   "pcoff:requestPcOnWithLeaveSeatUnlock",
   async (
     _event,
-    payload: { password: string; reason?: string }
+    payload: { password: string; reason?: string; leaveSeatOffInputValue?: number }
   ): Promise<ActionResult> => {
     const api = await getApiClient();
     if (!api) return { source: "mock", success: false, error: "로그인 필요" };
@@ -2886,7 +3001,7 @@ ipcMain.handle(
     try {
       const eventName = "Lock Off - 이석해제";
       const emergencyYn =
-        localLeaveSeatDetectedAt ? buildLeaveSeatEmergencyYn(localLeaveSeatDetectedAt) : "N";
+        localLeaveSeatDetectedAt ? buildLeaveSeatEmergencyYn(localLeaveSeatDetectedAt, payload.leaveSeatOffInputValue) : "N";
       const data = await api.callCmmPcOnOffLogPrc({
         tmckButnCd: "IN",
         eventName,
@@ -2905,6 +3020,7 @@ ipcMain.handle(
         await logger.write(LOG_CODES.LEAVE_SEAT_RELEASED, "INFO", { reason: localLeaveSeatReason ?? "unknown" });
         await leaveSeatReporter.reportEnd(payload.reason);
         localLeaveSeatDetectedAt = null;
+        localLeaveSeatDetectedAtEnd = null;
         localLeaveSeatReason = null;
       }
       const fresh = await api.getPcOffWorkTime();
@@ -3048,8 +3164,7 @@ ipcMain.handle("pcoff:refreshMyAttendance", async () => {
     if (!isHttpError) void offlineManager.reportApiFailure("api");
     const fallbackData = buildMockWorkTime() as Record<string, unknown>;
     if (localLeaveSeatDetectedAt) {
-      fallbackData.screenType = "empty";
-      fallbackData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+      applyLocalLeaveSeatToMerged(fallbackData);
     }
     try {
       const cfg = await readJson<{
@@ -3083,27 +3198,52 @@ ipcMain.handle("pcoff:setOperationMode", async (_event, mode: OperationMode) => 
 });
 
 ipcMain.handle("pcoff:getOperationMode", async () => {
+  if (testModeEnabled && testModeForceOperationMode && testModeForceOperationMode !== "AUTO") {
+    return { mode: testModeForceOperationMode };
+  }
   return { mode: currentMode };
 });
 
-// 테스트 모드 (로컬 설정값으로 시업/종업/이석 재현)
+// 테스트 모드 (로컬 설정값으로 시업/종업/이석 재현). 트레이 메뉴에는 테스트 메뉴 없음(개발자 전용, 핫키만)
 ipcMain.handle("pcoff:getTestModeState", async () => {
-  return { enabled: testModeEnabled, overrides: { ...testModeOverrides } };
+  const allowed = await getAllowTestMode();
+  return {
+    allowed,
+    enabled: testModeEnabled,
+    forceScreenType: testModeForceScreenType,
+    forceOperationMode: testModeForceOperationMode,
+    bypassApi: testModeBypassApi,
+    overrides: { ...testModeOverrides }
+  };
 });
-ipcMain.handle("pcoff:setTestModeEnabled", async (_event, enabled: boolean) => {
-  testModeEnabled = !!enabled;
-  if (!testModeEnabled) {
-    testModeOverrides = {};
-    lastWorkTimeFetchedAt = null;
-  }
+function broadcastTestModeChanged(): void {
   const wins = [mainWindow, ...Array.from(lockWindowsByDisplayId.values())].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed()));
+  const payload = {
+    enabled: testModeEnabled,
+    forceScreenType: testModeForceScreenType,
+    forceOperationMode: testModeForceOperationMode,
+    bypassApi: testModeBypassApi,
+    overrides: { ...testModeOverrides }
+  };
   for (const win of wins) {
     try {
-      win.webContents.send("pcoff:test-mode-changed", { enabled: testModeEnabled });
+      win.webContents.send("pcoff:test-mode-changed", payload);
     } catch {
       // ignore
     }
   }
+}
+
+ipcMain.handle("pcoff:setTestModeEnabled", async (_event, enabled: boolean) => {
+  if (!!enabled && !(await getAllowTestMode())) return { enabled: false };
+  const prev = testModeEnabled;
+  testModeEnabled = !!enabled;
+  if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+  await saveTestModeState();
+  if (logger && prev !== testModeEnabled) {
+    void logger.write(testModeEnabled ? LOG_CODES.TEST_MODE_ENABLED : LOG_CODES.TEST_MODE_DISABLED, "INFO", {});
+  }
+  broadcastTestModeChanged();
   return { enabled: testModeEnabled };
 });
 ipcMain.handle("pcoff:setTestOverrides", async (_event, overrides: Record<string, unknown>) => {
@@ -3111,7 +3251,71 @@ ipcMain.handle("pcoff:setTestOverrides", async (_event, overrides: Record<string
   const base = Object.keys(lastWorkTimeData).length > 0 ? lastWorkTimeData : (buildMockWorkTime() as Record<string, unknown>);
   lastWorkTimeData = mergeTestOverrides(base);
   lastWorkTimeFetchedAt = new Date().toISOString();
+  await saveTestModeState();
+  if (logger) void logger.write(LOG_CODES.TEST_MODE_OVERRIDE_UPDATED, "INFO", { keys: Object.keys(testModeOverrides) });
+  broadcastTestModeChanged();
   return { success: true };
+});
+
+ipcMain.handle("pcoff:setTestModeState", async (_event, patch: { enabled?: boolean; forceScreenType?: string; forceOperationMode?: string; bypassApi?: boolean; overrides?: Record<string, unknown> }) => {
+  if (patch && typeof patch === "object") {
+    if (typeof patch.enabled === "boolean") {
+      if (patch.enabled && !(await getAllowTestMode())) {
+        // allowTestMode: false 시 테스트 모드 켜기 무시
+      } else {
+        testModeEnabled = patch.enabled;
+        if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+      }
+    }
+    if (patch.forceScreenType === "AUTO" || patch.forceScreenType === "BEFORE" || patch.forceScreenType === "OFF" || patch.forceScreenType === "EMPTY") {
+      testModeForceScreenType = patch.forceScreenType;
+      if (logger) void logger.write(LOG_CODES.TEST_MODE_FORCE_SCREEN_CHANGED, "INFO", { forceScreenType: patch.forceScreenType });
+    }
+    if (patch.forceOperationMode === "AUTO" || patch.forceOperationMode === "NORMAL" || patch.forceOperationMode === "TEMP_EXTEND" || patch.forceOperationMode === "EMERGENCY_USE" || patch.forceOperationMode === "EMERGENCY_RELEASE") {
+      testModeForceOperationMode = patch.forceOperationMode as TestForceOperationMode;
+      if (logger) void logger.write(LOG_CODES.TEST_MODE_FORCE_OPERATION_CHANGED, "INFO", { forceOperationMode: patch.forceOperationMode });
+    }
+    if (typeof patch.bypassApi === "boolean") testModeBypassApi = patch.bypassApi;
+    if (patch.overrides && typeof patch.overrides === "object") {
+      testModeOverrides = { ...patch.overrides };
+      const base = Object.keys(lastWorkTimeData).length > 0 ? lastWorkTimeData : (buildMockWorkTime() as Record<string, unknown>);
+      lastWorkTimeData = mergeTestOverrides(base);
+      lastWorkTimeFetchedAt = new Date().toISOString();
+    }
+  }
+  await saveTestModeState();
+  broadcastTestModeChanged();
+  return { enabled: testModeEnabled, forceScreenType: testModeForceScreenType, forceOperationMode: testModeForceOperationMode, bypassApi: testModeBypassApi, overrides: { ...testModeOverrides } };
+});
+
+/** lock.js calcLeaveSeatPolicy: requireReason = leaveSeatReasonYn===YES && leaveSeatReasonManYn===YES && !isBreakTime */
+const TEST_PRESETS: Record<string, { forceScreenType?: TestForceScreenType; forceOperationMode?: TestForceOperationMode; overrides?: Record<string, unknown> }> = {
+  before: { forceScreenType: "BEFORE" },
+  off: { forceScreenType: "OFF" },
+  empty_reason_required: { forceScreenType: "EMPTY", overrides: { leaveSeatUseYn: "Y", leaveSeatReasonYn: "YES", leaveSeatReasonManYn: "YES" } },
+  empty_reason_exempt: { forceScreenType: "EMPTY", overrides: { leaveSeatUseYn: "Y", leaveSeatReasonYn: "NO", leaveSeatReasonManYn: "NO" } },
+  mode_normal: { forceOperationMode: "NORMAL" },
+  mode_temp_extend: { forceOperationMode: "TEMP_EXTEND" },
+  mode_emergency_use: { forceOperationMode: "EMERGENCY_USE" },
+  mode_emergency_release: { forceOperationMode: "EMERGENCY_RELEASE" },
+  reset: { forceScreenType: "AUTO", forceOperationMode: "AUTO", overrides: {} }
+};
+
+ipcMain.handle("pcoff:applyTestPreset", async (_event, name: string) => {
+  const preset = TEST_PRESETS[name];
+  if (!preset) return { success: false, error: "unknown_preset" };
+  if (preset.forceScreenType !== undefined) testModeForceScreenType = preset.forceScreenType;
+  if (preset.forceOperationMode !== undefined) testModeForceOperationMode = preset.forceOperationMode;
+  if (preset.overrides !== undefined) {
+    testModeOverrides = { ...preset.overrides };
+    const base = Object.keys(lastWorkTimeData).length > 0 ? lastWorkTimeData : (buildMockWorkTime() as Record<string, unknown>);
+    lastWorkTimeData = mergeTestOverrides(base);
+    lastWorkTimeFetchedAt = new Date().toISOString();
+  }
+  await saveTestModeState();
+  if (logger) void logger.write(LOG_CODES.TEST_MODE_PRESET_APPLIED, "INFO", { preset: name });
+  broadcastTestModeChanged();
+  return { success: true, forceScreenType: testModeForceScreenType, forceOperationMode: testModeForceOperationMode, overrides: { ...testModeOverrides } };
 });
 
 // 로그인 성공 후: pcOnYmdTime/pcOffYmdTime 기준 잠금 필요 시 잠금화면 표시 (호출한 창을 재사용해 새 창 안 띄움)
@@ -3182,9 +3386,10 @@ ipcMain.handle("pcoff:checkLockAndShow", async (event) => {
         idleSeconds,
         leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
       });
+      const detectedAtEnd = new Date(detectedAt.getTime() + idleSeconds * 1000);
       const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
         : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
-      showLockForLocalLeaveSeat(detectedAt, "INACTIVITY", wsType);
+      showLockForLocalLeaveSeat(detectedAt, "INACTIVITY", wsType, detectedAtEnd);
     },
     onSleepDetected: (detectedAt, sleepElapsedSeconds) => {
       void logger.write(LOG_CODES.LEAVE_SEAT_SLEEP_DETECTED, "INFO", {
@@ -3192,9 +3397,10 @@ ipcMain.handle("pcoff:checkLockAndShow", async (event) => {
         sleepElapsedSeconds,
         leaveSeatTimeMinutes: lastWorkTimeData?.leaveSeatTime ?? 0
       });
+      const detectedAtEnd = new Date(detectedAt.getTime() + sleepElapsedSeconds * 1000);
       const wsType = currentMode === "TEMP_EXTEND" ? "TEMP_EXTEND"
         : currentMode === "EMERGENCY_USE" ? "EMERGENCY_USE" : "NORMAL";
-      showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED", wsType);
+      showLockForLocalLeaveSeat(detectedAt, "SLEEP_EXCEEDED", wsType, detectedAtEnd);
     },
     onSleepEntered: () => void logger.write(LOG_CODES.SLEEP_ENTERED, "INFO", {}),
     onSleepResumed: () => void logger.write(LOG_CODES.SLEEP_RESUMED, "INFO", {})

@@ -13,7 +13,8 @@ export const PATHS = {
   installerRegistry: "installer-registry.json",
   leaveSeatQueue: "leave-seat-queue.jsonl",
   offlineState: "offline-state.json",
-  emergencyUnlockState: "emergency-unlock-state.json"
+  emergencyUnlockState: "emergency-unlock-state.json",
+  testModeState: "test-mode-state.json"
 } as const;
 
 export const LOG_CODES = {
@@ -109,6 +110,14 @@ export const LOG_CODES = {
   SCREEN_TYPE_OFF: "SCREEN_TYPE_OFF",
   SCREEN_TYPE_USABLE: "SCREEN_TYPE_USABLE",
   SCREEN_TRANSITION: "SCREEN_TRANSITION",
+
+  // 테스트 모드
+  TEST_MODE_ENABLED: "TEST_MODE_ENABLED",
+  TEST_MODE_DISABLED: "TEST_MODE_DISABLED",
+  TEST_MODE_OVERRIDE_UPDATED: "TEST_MODE_OVERRIDE_UPDATED",
+  TEST_MODE_PRESET_APPLIED: "TEST_MODE_PRESET_APPLIED",
+  TEST_MODE_FORCE_SCREEN_CHANGED: "TEST_MODE_FORCE_SCREEN_CHANGED",
+  TEST_MODE_FORCE_OPERATION_CHANGED: "TEST_MODE_FORCE_OPERATION_CHANGED",
 
   // 프로세스 Kill 통제 (FR-18)
   KILL_REQUEST_CREATED: "KILL_REQUEST_CREATED",

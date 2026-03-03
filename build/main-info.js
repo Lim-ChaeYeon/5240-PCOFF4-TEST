@@ -28,6 +28,12 @@ const checkUpdateEl = document.getElementById("check-update");
 const dateTextEl = document.getElementById("date-text");
 const timeTextEl = document.getElementById("time-text");
 const toastEl = document.getElementById("toast");
+const testModeHintEl = document.getElementById("test-mode-hint");
+const testModeDrawerEl = document.getElementById("test-mode-drawer");
+const testForceScreenEl = document.getElementById("test-force-screen");
+const testForceModeEl = document.getElementById("test-force-mode");
+const testApplyOverridesEl = document.getElementById("test-apply-overrides");
+const testStartBtnEl = document.getElementById("test-start-btn");
 
 const MODE_CONFIG = {
   NORMAL: { text: "일반", className: "normal" },
@@ -321,6 +327,219 @@ function setupModeChangeListener() {
   });
 }
 
+function updateTestModeHint(enabled) {
+  if (!testModeHintEl) return;
+  testModeHintEl.classList.toggle("hidden", !enabled);
+}
+
+function updateTestModeDrawerVisibility(enabled) {
+  if (!testModeDrawerEl) return;
+  testModeDrawerEl.classList.toggle("open", !!enabled);
+  testModeDrawerEl.setAttribute("aria-hidden", String(!enabled));
+}
+
+function syncTestModeDrawerFromState(state) {
+  if (testForceScreenEl && state.forceScreenType) testForceScreenEl.value = state.forceScreenType;
+  if (testForceModeEl && state.forceOperationMode) testForceModeEl.value = state.forceOperationMode;
+  syncTestModeDrawerInputsFromState(state.overrides || {});
+}
+
+function syncTestModeDrawerInputsFromState(overrides) {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (val === undefined || val === null) return;
+    el.value = val === "" ? "" : String(val);
+  };
+  set("test-pcOnYmdTime", overrides.pcOnYmdTime ?? "");
+  set("test-pcOffYmdTime", overrides.pcOffYmdTime ?? "");
+  set("test-pcExCount", overrides.pcExCount ?? "");
+  set("test-pcExMaxCount", overrides.pcExMaxCount ?? "");
+  set("test-pcExTime", overrides.pcExTime ?? "");
+  set("test-leaveSeatUseYn", overrides.leaveSeatUseYn ?? "");
+  set("test-leaveSeatTime", overrides.leaveSeatTime ?? "");
+  set("test-leaveSeatReasonYn", overrides.leaveSeatReasonYn ?? "");
+  set("test-leaveSeatReasonManYn", overrides.leaveSeatReasonManYn ?? "");
+  set("test-pcoffEmergencyYesNo", overrides.pcoffEmergencyYesNo ?? "");
+}
+
+/** 프리셋별 폼 채우기용 값 (Main TEST_PRESETS와 동기화) */
+const PRESET_FORM_VALUES = {
+  before: { forceScreenType: "BEFORE", forceOperationMode: "AUTO", overrides: {} },
+  off: { forceScreenType: "OFF", forceOperationMode: "AUTO", overrides: {} },
+  empty_reason_required: { forceScreenType: "EMPTY", forceOperationMode: "AUTO", overrides: { leaveSeatUseYn: "Y", leaveSeatReasonYn: "YES", leaveSeatReasonManYn: "YES" } },
+  empty_reason_exempt: { forceScreenType: "EMPTY", forceOperationMode: "AUTO", overrides: { leaveSeatUseYn: "Y", leaveSeatReasonYn: "NO", leaveSeatReasonManYn: "NO" } },
+  mode_normal: { forceScreenType: "AUTO", forceOperationMode: "NORMAL", overrides: {} },
+  mode_temp_extend: { forceScreenType: "AUTO", forceOperationMode: "TEMP_EXTEND", overrides: {} },
+  mode_emergency_use: { forceScreenType: "AUTO", forceOperationMode: "EMERGENCY_USE", overrides: {} },
+  mode_emergency_release: { forceScreenType: "AUTO", forceOperationMode: "EMERGENCY_RELEASE", overrides: {} },
+  reset: { forceScreenType: "AUTO", forceOperationMode: "AUTO", overrides: {} }
+};
+
+async function refreshAfterTestModeChange() {
+  await refreshAttendance({ silent: true });
+  if (window.pcoffApi?.getTrayOperationInfo) {
+    const info = await window.pcoffApi.getTrayOperationInfo().catch(() => null);
+    if (info) setMode(info.mode || "NORMAL");
+  }
+}
+
+async function setupTestModeDrawer() {
+  if (!window.pcoffApi?.getTestModeState || !window.pcoffApi?.setTestModeState) return;
+  try {
+    const state = await window.pcoffApi.getTestModeState();
+    const canUse = state.allowed !== false;
+    updateTestModeHint(canUse && state.enabled);
+    updateTestModeDrawerVisibility(canUse && state.enabled);
+    syncTestModeDrawerFromState(state);
+  } catch {
+    updateTestModeHint(false);
+    updateTestModeDrawerVisibility(false);
+  }
+  window.pcoffApi.onTestModeChanged?.((data) => {
+    updateTestModeHint(data.enabled);
+    updateTestModeDrawerVisibility(data.enabled);
+    syncTestModeDrawerFromState(data);
+  });
+
+  if (testApplyOverridesEl && window.pcoffApi?.setTestModeState) {
+    testApplyOverridesEl.addEventListener("click", async () => {
+      const overrides = {};
+      const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
+      const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
+      if (rawPcOn) {
+        if (!/^\d{12}$/.test(rawPcOn)) {
+          showToast("시업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+          return;
+        }
+        overrides.pcOnYmdTime = rawPcOn;
+      }
+      if (rawPcOff) {
+        if (!/^\d{12}$/.test(rawPcOff)) {
+          showToast("종업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+          return;
+        }
+        overrides.pcOffYmdTime = rawPcOff;
+      }
+      const pcExCount = document.getElementById("test-pcExCount")?.value?.trim();
+      if (pcExCount !== "") overrides.pcExCount = parseInt(pcExCount, 10);
+      const pcExMaxCount = document.getElementById("test-pcExMaxCount")?.value?.trim();
+      if (pcExMaxCount !== "") overrides.pcExMaxCount = parseInt(pcExMaxCount, 10);
+      const pcExTime = document.getElementById("test-pcExTime")?.value?.trim();
+      if (pcExTime !== "") overrides.pcExTime = parseInt(pcExTime, 10);
+      const leaveSeatUseYn = document.getElementById("test-leaveSeatUseYn")?.value;
+      if (leaveSeatUseYn) overrides.leaveSeatUseYn = leaveSeatUseYn;
+      const leaveSeatTime = document.getElementById("test-leaveSeatTime")?.value?.trim();
+      if (leaveSeatTime !== "") overrides.leaveSeatTime = parseInt(leaveSeatTime, 10);
+      const leaveSeatReasonYn = document.getElementById("test-leaveSeatReasonYn")?.value;
+      if (leaveSeatReasonYn) overrides.leaveSeatReasonYn = leaveSeatReasonYn;
+      const leaveSeatReasonManYn = document.getElementById("test-leaveSeatReasonManYn")?.value;
+      if (leaveSeatReasonManYn) overrides.leaveSeatReasonManYn = leaveSeatReasonManYn;
+      const pcoffEmergencyYesNo = document.getElementById("test-pcoffEmergencyYesNo")?.value;
+      if (pcoffEmergencyYesNo) overrides.pcoffEmergencyYesNo = pcoffEmergencyYesNo;
+
+      try {
+        const state = await window.pcoffApi.getTestModeState();
+        const merged = { ...(state.overrides || {}), ...overrides };
+        await window.pcoffApi.setTestModeState({ overrides: merged });
+        await refreshAfterTestModeChange();
+        showToast("입력값 적용됨. 잠금/해제 동작을 확인하세요.");
+      } catch (e) {
+        console.warn("setTestModeState overrides failed", e);
+        showToast("값 적용 실패");
+      }
+    });
+  }
+
+  if (testForceScreenEl && window.pcoffApi?.setTestModeState) {
+    testForceScreenEl.addEventListener("change", async () => {
+      const val = testForceScreenEl.value;
+      try {
+        await window.pcoffApi.setTestModeState({ forceScreenType: val });
+        await refreshAfterTestModeChange();
+      } catch (e) {
+        console.warn("setTestModeState forceScreenType failed", e);
+      }
+    });
+  }
+  if (testForceModeEl && window.pcoffApi?.setTestModeState) {
+    testForceModeEl.addEventListener("change", async () => {
+      const val = testForceModeEl.value;
+      try {
+        await window.pcoffApi.setTestModeState({ forceOperationMode: val });
+        await refreshAfterTestModeChange();
+      } catch (e) {
+        console.warn("setTestModeState forceOperationMode failed", e);
+      }
+    });
+  }
+
+  const presetBtns = document.querySelectorAll(".preset-btn");
+  presetBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const name = btn.getAttribute("data-preset");
+      if (!name || !PRESET_FORM_VALUES[name]) return;
+      const preset = PRESET_FORM_VALUES[name];
+      if (testForceScreenEl && preset.forceScreenType) testForceScreenEl.value = preset.forceScreenType;
+      if (testForceModeEl && preset.forceOperationMode) testForceModeEl.value = preset.forceOperationMode;
+      syncTestModeDrawerInputsFromState(preset.overrides || {});
+      showToast("프리셋 선택됨. [시작]을 눌러 적용하세요.");
+    });
+  });
+
+  if (testStartBtnEl && window.pcoffApi?.setTestModeState) {
+    testStartBtnEl.addEventListener("click", async () => {
+      const forceScreenType = testForceScreenEl?.value || "AUTO";
+      const forceOperationMode = testForceModeEl?.value || "AUTO";
+      const overrides = {};
+      const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
+      const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
+      if (rawPcOn) {
+        if (!/^\d{12}$/.test(rawPcOn)) {
+          showToast("시업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+          return;
+        }
+        overrides.pcOnYmdTime = rawPcOn;
+      }
+      if (rawPcOff) {
+        if (!/^\d{12}$/.test(rawPcOff)) {
+          showToast("종업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+          return;
+        }
+        overrides.pcOffYmdTime = rawPcOff;
+      }
+      const pcExCount = document.getElementById("test-pcExCount")?.value?.trim();
+      if (pcExCount !== "") overrides.pcExCount = parseInt(pcExCount, 10);
+      const pcExMaxCount = document.getElementById("test-pcExMaxCount")?.value?.trim();
+      if (pcExMaxCount !== "") overrides.pcExMaxCount = parseInt(pcExMaxCount, 10);
+      const pcExTime = document.getElementById("test-pcExTime")?.value?.trim();
+      if (pcExTime !== "") overrides.pcExTime = parseInt(pcExTime, 10);
+      const leaveSeatUseYn = document.getElementById("test-leaveSeatUseYn")?.value;
+      if (leaveSeatUseYn) overrides.leaveSeatUseYn = leaveSeatUseYn;
+      const leaveSeatTime = document.getElementById("test-leaveSeatTime")?.value?.trim();
+      if (leaveSeatTime !== "") overrides.leaveSeatTime = parseInt(leaveSeatTime, 10);
+      const leaveSeatReasonYn = document.getElementById("test-leaveSeatReasonYn")?.value;
+      if (leaveSeatReasonYn) overrides.leaveSeatReasonYn = leaveSeatReasonYn;
+      const leaveSeatReasonManYn = document.getElementById("test-leaveSeatReasonManYn")?.value;
+      if (leaveSeatReasonManYn) overrides.leaveSeatReasonManYn = leaveSeatReasonManYn;
+      const pcoffEmergencyYesNo = document.getElementById("test-pcoffEmergencyYesNo")?.value;
+      if (pcoffEmergencyYesNo) overrides.pcoffEmergencyYesNo = pcoffEmergencyYesNo;
+
+      try {
+        await window.pcoffApi.setTestModeState({ forceScreenType, forceOperationMode, overrides });
+        await refreshAfterTestModeChange();
+        showToast("적용됨.");
+        if ((forceScreenType === "BEFORE" || forceScreenType === "OFF" || forceScreenType === "EMPTY") && window.pcoffApi?.openLockWindow) {
+          await window.pcoffApi.openLockWindow();
+        }
+      } catch (e) {
+        console.warn("시작 적용 실패", e);
+        showToast("적용 실패");
+      }
+    });
+  }
+}
+
 async function init() {
   updateClock();
   setInterval(updateClock, 1000);
@@ -337,6 +556,7 @@ async function init() {
 
   refreshAttendanceEl?.addEventListener("click", () => refreshAttendance({ silent: false }));
   setupModeChangeListener();
+  await setupTestModeDrawer();
 
   // 업데이트 확인 버튼 (작동정보 화면) — 버튼이 있으면 항상 리스너 부착, 클릭 시 즉시 피드백 후 API 호출
   if (checkUpdateEl) {

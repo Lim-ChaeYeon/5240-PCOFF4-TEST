@@ -399,14 +399,19 @@ function getRendererUrl(htmlFile: string): string {
   return `app://./app/renderer/${htmlFile}`;
 }
 
-/** 창에 HTML 로드 — 맥 패키징 시 app://, 그 외 loadFile. 반환 Promise로 catch 가능 */
-function loadRendererInWindow(win: BrowserWindow, htmlFile: string): Promise<void> {
+/** 창에 HTML 로드 — 맥 패키징 시 app://, 그 외 loadFile. query 있으면 URL/loadFile 옵션에 반영 (보조 잠금창 등). 반환 Promise로 catch 가능 */
+function loadRendererInWindow(win: BrowserWindow, htmlFile: string, options?: { query?: Record<string, string> }): Promise<void> {
   const pathOrUrl = process.platform === "darwin" && app.isPackaged
     ? getRendererUrl(htmlFile)
     : getRendererPath(htmlFile);
-  const p = process.platform === "darwin" && app.isPackaged
-    ? win.loadURL(pathOrUrl as string)
-    : win.loadFile(pathOrUrl as string);
+  const query = options?.query;
+  let p: Promise<void>;
+  if (process.platform === "darwin" && app.isPackaged) {
+    const url = query ? `${pathOrUrl}?${new URLSearchParams(query).toString()}` : (pathOrUrl as string);
+    p = win.loadURL(url);
+  } else {
+    p = query ? win.loadFile(pathOrUrl as string, { query }) : win.loadFile(pathOrUrl as string);
+  }
   return p.catch((err) => {
     console.error("[PCOFF] loadRendererInWindow failed:", htmlFile, pathOrUrl, err);
     throw err;
@@ -490,34 +495,49 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
 /** 보조 잠금창 전부 닫기 시 플래그 — close 이벤트에서 preventDefault 하지 않도록 */
 let closingAllLockWindows = false;
 
-/** 보조 잠금창 전부 닫기 (잠금 해제/로그인/작동정보 전환 시 호출). 잠금 해제 후 보조 모니터 잠금창은 반드시 모두 제거. */
+/** 보조 잠금창 닫을 때 풀스크린 해제 후 destroy까지 대기(ms). Windows·macOS 모두 풀스크린 해제 완료 후 제거되도록 보수적으로 300ms 적용 */
+const CLOSE_LOCK_WINDOWS_DESTROY_DELAY_MS = 300;
+
+/** 보조 잠금창 전부 닫기 (잠금 해제/로그인/작동정보 전환 시 호출). 잠금 해제 후 보조 모니터 잠금창은 반드시 모두 제거.
+ * destroy는 지연 후 실행. closingAllLockWindows는 지연 destroy 모두 끝난 뒤에만 false로 — 그 전에 false 되면 close 핸들러가 preventDefault 해서 맥 등에서 창이 안 사라짐 */
 function closeAllLockWindows(): void {
   if (lockWindowsByDisplayId.size === 0) return;
   closingAllLockWindows = true;
-  try {
-    const toClose = Array.from(lockWindowsByDisplayId.entries());
-    lockWindowsByDisplayId.clear();
-    for (const [_displayId, win] of toClose) {
-      if (win.isDestroyed()) continue;
-      removeLockWindowCloseHandler(win);
-      try {
-        win.setVisibleOnAllWorkspaces(false);
-        win.setFullScreen(false);
-        win.setClosable(true);
-        win.hide();
-      } catch {
-        // 이미 파괴 중이거나 오류 시 무시
-      }
-      try {
-        if (!win.isDestroyed()) win.destroy();
-      } catch {
-        // destroy 실패 시 무시
-      }
+  const toClose = Array.from(lockWindowsByDisplayId.entries());
+  lockWindowsByDisplayId.clear();
+  const toDestroy = toClose.filter(([, w]) => !w.isDestroyed());
+  if (toDestroy.length === 0) {
+    closingAllLockWindows = false;
+    return;
+  }
+  const destroyOne = (w: BrowserWindow) => {
+    try {
+      if (w.isDestroyed()) return;
+      w.removeAllListeners("close");
+      w.destroy();
+    } catch {
+      // destroy 실패 시 무시
     }
-  } finally {
-    setImmediate(() => {
-      closingAllLockWindows = false;
-    });
+  };
+  let remaining = toDestroy.length;
+  const onDestroyDone = () => {
+    remaining--;
+    if (remaining <= 0) setImmediate(() => { closingAllLockWindows = false; });
+  };
+  for (const [_displayId, win] of toDestroy) {
+    removeLockWindowCloseHandler(win);
+    try {
+      win.setVisibleOnAllWorkspaces(false);
+      win.setFullScreen(false);
+      win.setClosable(true);
+      win.hide();
+    } catch {
+      // 이미 파괴 중이거나 오류 시 무시
+    }
+    setTimeout(() => {
+      destroyOne(win);
+      onDestroyDone();
+    }, CLOSE_LOCK_WINDOWS_DESTROY_DELAY_MS);
   }
 }
 
@@ -596,7 +616,7 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
       else {
         getLockInitialWorkPayload().then((payload) => {
           try {
-            existing.webContents.send("pcoff:lock-initial-work", payload);
+            existing.webContents.send("pcoff:lock-initial-work", { ...payload, isSecondary: true });
           } catch {
             // 이미 파괴 중이면 무시
           }
@@ -628,10 +648,10 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
     win.webContents.once("did-finish-load", () => {
       if (win.isDestroyed() || currentScreen !== "lock") return;
       getLockInitialWorkPayload().then((payload) => {
-        if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", payload);
+        if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", { ...payload, isSecondary: true });
       }).catch(() => {});
     });
-    await loadRendererInWindow(win, "lock.html").catch((err) => {
+    await loadRendererInWindow(win, "lock.html", { query: { secondary: "1" } }).catch((err) => {
       console.error("[PCOFF] 보조 잠금창 로드 실패:", display.id, err);
     });
     if (!win.isDestroyed() && currentScreen === "lock") {
@@ -705,6 +725,7 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
     void createTrayInfoWindow();
     return;
   }
+  // Windows: 잠금 해제 시 풀스크린이 아닌 디폴트 크기(620×840)로 표시
   mainWindow.setFullScreen(false);
   mainWindow.setAlwaysOnTop(false);
   mainWindow.setVisibleOnAllWorkspaces(false);
@@ -716,6 +737,14 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
   mainWindow.setAlwaysOnTop(true);
   mainWindow.setAlwaysOnTop(false);
   const win = mainWindow;
+  if (process.platform === "win32") {
+    setImmediate(() => {
+      if (win.isDestroyed() || currentScreen !== "tray-info") return;
+      win.setFullScreen(false);
+      if (win.isMaximized()) win.unmaximize();
+      win.setSize(620, 840);
+    });
+  }
   const showWhenReady = () => {
     if (win.isDestroyed() || currentScreen !== "tray-info") return;
     win.setFullScreen(false);

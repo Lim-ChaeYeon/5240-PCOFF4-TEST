@@ -40,6 +40,11 @@
         background: rgba(255, 255, 255, 0.2);
         text-shadow: none;
       }
+      /* 보조 모니터 잠금창: 버튼·근태정보 링크 숨김 (주 모니터에서만 조작) */
+      body.lock-secondary-display .bottom-box .button-box,
+      body.lock-secondary-display #get-attend {
+        display: none !important;
+      }
     </style>
   </head>
   <body>
@@ -103,6 +108,14 @@
     </aside>
 
     <div id="toast" class="toast"></div>
+
+    <!-- PC-ON/PC-OFF/임시연장 등 API 처리 중 프로그레스 표시 -->
+    <div id="action-progress-overlay" class="action-progress-overlay hidden" aria-live="polite">
+      <div class="action-progress-box">
+        <div class="action-progress-bar" aria-hidden="true"></div>
+        <p class="action-progress-text">처리 중...</p>
+      </div>
+    </div>
 
     <!-- 긴급사용 안내: OTP 발송 전 확인용. 확인 시 Step1(OTP 발송) 후 입력 모달로 이동 -->
     <div id="emergency-intro-modal" class="modal-overlay hidden" aria-label="긴급사용 안내">

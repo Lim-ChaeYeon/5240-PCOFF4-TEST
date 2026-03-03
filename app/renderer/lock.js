@@ -13,6 +13,7 @@ const timeTextEl = document.getElementById("time-text");
 const attendPanelEl = document.getElementById("attend-panel");
 const attendContentEl = document.getElementById("attend-content");
 const toastEl = document.getElementById("toast");
+const actionProgressOverlayEl = document.getElementById("action-progress-overlay");
 const btnExtendEl = document.getElementById("btn-extend");
 const btnUseEl = document.getElementById("btn-use");
 const btnPlayEl = document.getElementById("btn-play");
@@ -382,6 +383,7 @@ async function refreshLockScreenFromWorkTime() {
 }
 
 async function runAction(label, action) {
+  if (actionProgressOverlayEl) actionProgressOverlayEl.classList.remove("hidden");
   try {
     const result = await action();
     if (result?.stillLocked) {
@@ -399,6 +401,8 @@ async function runAction(label, action) {
     showToast(`${label} 오류`);
     console.error(error);
     return undefined;
+  } finally {
+    if (actionProgressOverlayEl) actionProgressOverlayEl.classList.add("hidden");
   }
 }
 
@@ -741,6 +745,11 @@ let currentLeaveSeatPolicy = { isLeaveSeat: false, requireReason: false, isBreak
 // 보조 잠금창: 메인에서 동일 근태/배경 데이터 수신 후 적용 (주모니터와 동일 문구·배경). 수신 시 currentWork/currentLeaveSeatPolicy 갱신해 PC-ON 분기(이석 비밀번호 등) 반영.
 if (typeof window !== "undefined" && window.pcoffApi?.onLockInitialWork) {
   window.pcoffApi.onLockInitialWork((data) => {
+    if (data && data.isSecondary === true) {
+      lockIsSecondary = true;
+      applySecondaryDisplayMode();
+      hideOfflineOverlay();
+    }
     currentWork = coerceWorkTimeFromApi(data);
     currentLeaveSeatPolicy = calcLeaveSeatPolicy(currentWork);
     if (extendCountEl) extendCountEl.textContent = String(currentWork.pcExCount ?? 0);
@@ -992,8 +1001,17 @@ function setupEmergencyUseListener() {
 
 /* ──── FR-17: 오프라인 유예/잠금 UI ──── */
 let offlineCountdownTimer = null;
+/** 보조 모니터 잠금창 여부. true면 네트워크 끊김 팝업 미표시(주 모니터에서만 표시), 각종 버튼·근태정보 링크도 숨김. URL ?secondary=1 또는 lock-initial-work isSecondary로 설정 */
+let lockIsSecondary = typeof window !== "undefined" && window.location && new URLSearchParams(window.location.search || "").get("secondary") === "1";
+
+/** 보조 모니터 잠금창일 때 버튼(임시연장·긴급사용·긴급해제·PC-ON·PC-OFF)·나의 근태정보 불러오기 링크 숨김 */
+function applySecondaryDisplayMode() {
+  if (!lockIsSecondary || typeof document === "undefined") return;
+  document.body.classList.add("lock-secondary-display");
+}
 
 function showOfflineOverlay(snapshot) {
+  if (lockIsSecondary) return;
   const overlay = document.getElementById("offline-overlay");
   const titleEl = document.getElementById("offline-title");
   const descEl = document.getElementById("offline-desc");
@@ -1131,6 +1149,7 @@ function setupConnectivityListener() {
 }
 
 async function bootstrap() {
+  if (lockIsSecondary) applySecondaryDisplayMode();
   updateClock();
   setInterval(updateClock, 1000);
 
@@ -1204,6 +1223,7 @@ async function bootstrap() {
     if (needLeaveSeatPassword && window.pcoffApi?.requestPcOnWithLeaveSeatUnlock) {
       const result = await showLeaveSeatUnlockPasswordModal(policy);
       if (!result) return;
+      if (actionProgressOverlayEl) actionProgressOverlayEl.classList.remove("hidden");
       try {
         const res = await window.pcoffApi.requestPcOnWithLeaveSeatUnlock(result.password, result.reason || undefined, result.leaveSeatOffInputValue);
         if (res?.success === false) {
@@ -1219,6 +1239,8 @@ async function bootstrap() {
       } catch (e) {
         showToast("PC-ON (이석 해제) 오류");
         console.error(e);
+      } finally {
+        if (actionProgressOverlayEl) actionProgressOverlayEl.classList.add("hidden");
       }
       return;
     }

@@ -454,11 +454,13 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
       const existing = lockWindowsByDisplayId.get(display.id)!;
       if (existing.isDestroyed()) lockWindowsByDisplayId.delete(display.id);
       else {
-        try {
-          existing.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
-        } catch {
-          // 이미 파괴 중이면 무시
-        }
+        getLockInitialWorkPayload().then((payload) => {
+          try {
+            existing.webContents.send("pcoff:lock-initial-work", payload);
+          } catch {
+            // 이미 파괴 중이면 무시
+          }
+        }).catch(() => {});
         continue;
       }
     }
@@ -485,7 +487,9 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
     win.on("closed", () => lockWindowsByDisplayId.delete(display.id));
     win.webContents.once("did-finish-load", () => {
       if (win.isDestroyed() || currentScreen !== "lock") return;
-      win.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
+      getLockInitialWorkPayload().then((payload) => {
+        if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", payload);
+      }).catch(() => {});
     });
     await loadRendererInWindow(win, "lock.html").catch((err) => {
       console.error("[PCOFF] 보조 잠금창 로드 실패:", display.id, err);
@@ -761,6 +765,22 @@ async function verifyLeaveSeatUnlockViaUrl(
   return { success: false, message: "비밀번호가 맞지 않습니다." };
 }
 
+/** lock-initial-work 전송용 페이로드. lastWorkTimeData에 config.emergencyOtpSendTo가 없으면 config에서 병합 (조직장 수신 메시지 적용) */
+async function getLockInitialWorkPayload(): Promise<Record<string, unknown>> {
+  const payload = { ...lastWorkTimeData } as Record<string, unknown>;
+  if (payload.emergencyOtpSendTo === "MANAGER" || payload.emergencyOtpSendTo === "SELF") return payload;
+  const config = await readJson<{ emergencyOtpSendTo?: "SELF" | "MANAGER"; pcoff?: { emergencyOtpSendTo?: "SELF" | "MANAGER" } }>(
+    join(baseDir, PATHS.config),
+    {}
+  );
+  const val = config.emergencyOtpSendTo ?? config.pcoff?.emergencyOtpSendTo;
+  if (val === "MANAGER" || val === "SELF") {
+    payload.emergencyOtpSendTo = val;
+    (lastWorkTimeData as Record<string, unknown>).emergencyOtpSendTo = val;
+  }
+  return payload;
+}
+
 /** FR-14: 정책 객체를 WorkTimeResponse 형태로 병합 (lockScreen.screens, leaveSeatUnlockRequirePassword) */
 function mergeLockPolicyIntoData(data: WorkTimeResponse, policy: TenantLockPolicy): WorkTimeResponse {
   const merged = { ...data } as Record<string, unknown>;
@@ -780,7 +800,21 @@ function mergeLockPolicyIntoData(data: WorkTimeResponse, policy: TenantLockPolic
   if (policy.unlockPolicy?.leaveSeatUnlockRequirePassword !== undefined) {
     merged.leaveSeatUnlockRequirePassword = policy.unlockPolicy.leaveSeatUnlockRequirePassword;
   }
+  if (policy.unlockPolicy?.emergencyOtpSendTo === "MANAGER" || policy.unlockPolicy?.emergencyOtpSendTo === "SELF") {
+    merged.emergencyOtpSendTo = policy.unlockPolicy.emergencyOtpSendTo;
+  }
   return merged as WorkTimeResponse;
+}
+
+/** config에서 긴급사용 OTP 발송 대상 적용. API/lock-policy에 없을 때만 config 값 사용 (getPcOffWorkTime에 필드 없을 때 대비) */
+function applyEmergencyOtpSendToFromConfig(
+  data: Record<string, unknown>,
+  config: { emergencyOtpSendTo?: string; pcoff?: { emergencyOtpSendTo?: string } }
+): void {
+  const fromApi = data.emergencyOtpSendTo === "MANAGER" || data.emergencyOtpSendTo === "SELF";
+  if (fromApi) return;
+  const val = config.emergencyOtpSendTo ?? config.pcoff?.emergencyOtpSendTo;
+  if (val === "MANAGER" || val === "SELF") data.emergencyOtpSendTo = val;
 }
 
 /** 잠금화면 문구 포함 근태 조회 (getPcOffWorkTime + getLockScreenInfo / lockScreenApiUrl + config.json 병합). 핫키/잠금창 오픈 시 선호출용 */
@@ -793,6 +827,9 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
     };
     /** WebView와 동일한 잠금화면 API URL (예: https://5240.work/LockScreen/getScreenInfo.php). 설정 시 getLockScreenInfo.do 실패해도 이 URL로 문구 조회 */
     lockScreenApiUrl?: string;
+    /** 긴급사용 OTP 발송 대상. getPcOffWorkTime에 없을 때 사용. SELF=본인, MANAGER=조직장 */
+    emergencyOtpSendTo?: "SELF" | "MANAGER";
+    pcoff?: { emergencyOtpSendTo?: "SELF" | "MANAGER" };
   }>(join(baseDir, PATHS.config), {});
 
   let data = await api.getPcOffWorkTime();
@@ -847,6 +884,7 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
       if (screenInfo.lockScreenOffLogo != null) merged.lockScreenOffLogo = screenInfo.lockScreenOffLogo;
       if (screenInfo.lockScreenLeaveBackground != null) merged.lockScreenLeaveBackground = screenInfo.lockScreenLeaveBackground;
       if (screenInfo.lockScreenLeaveLogo != null) merged.lockScreenLeaveLogo = screenInfo.lockScreenLeaveLogo;
+      if (screenInfo.emergencyOtpSendTo === "MANAGER" || screenInfo.emergencyOtpSendTo === "SELF") merged.emergencyOtpSendTo = screenInfo.emergencyOtpSendTo;
       data = merged as WorkTimeResponse;
       console.info("[PCOFF] 잠금화면 문구 — getLockScreenInfo.do 적용됨");
     } else if (config.lockScreenApiUrl?.trim() && cachedUserServareaId) {
@@ -946,6 +984,8 @@ async function fetchWorkTimeWithLockScreen(api: PcOffApiClient): Promise<WorkTim
       if (applied) data = merged as WorkTimeResponse;
     }
   }
+  const dataRecord = data as Record<string, unknown>;
+  applyEmergencyOtpSendToFromConfig(dataRecord, config);
   return data;
 }
 
@@ -996,11 +1036,13 @@ async function createLockWindow(): Promise<void> {
     mainWindow.setBounds(primaryDisplay.bounds);
     mainWindow.webContents.once("did-finish-load", () => {
       if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "lock") {
-        try {
-          mainWindow.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
-        } catch {
-          // 이미 파괴 중이면 무시
-        }
+        getLockInitialWorkPayload().then((payload) => {
+          try {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("pcoff:lock-initial-work", payload);
+          } catch {
+            // 이미 파괴 중이면 무시
+          }
+        }).catch(() => {});
       }
     });
     await loadRendererInWindow(mainWindow, "lock.html").catch((err) => {
@@ -1051,11 +1093,13 @@ async function createLockWindow(): Promise<void> {
   win.setVisibleOnAllWorkspaces(true);
   win.webContents.once("did-finish-load", () => {
     if (!win.isDestroyed() && currentScreen === "lock") {
-      try {
-        win.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
-      } catch {
-        // 이미 파괴 중이면 무시
-      }
+      getLockInitialWorkPayload().then((payload) => {
+        try {
+          if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", payload);
+        } catch {
+          // 이미 파괴 중이면 무시
+        }
+      }).catch(() => {});
     }
   });
   win.webContents.on("did-fail-load", (_event, code, desc, url) => {
@@ -1128,11 +1172,13 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   win.setBounds(primaryDisplay.bounds);
   win.webContents.once("did-finish-load", () => {
     if (!win.isDestroyed() && currentScreen === "lock") {
-      try {
-        win.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
-      } catch {
-        // 이미 파괴 중이면 무시
-      }
+      getLockInitialWorkPayload().then((payload) => {
+        try {
+          if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", payload);
+        } catch {
+          // 이미 파괴 중이면 무시
+        }
+      }).catch(() => {});
     }
   });
   await loadRendererInWindow(win, "lock.html").catch((err) => {
@@ -1413,18 +1459,22 @@ async function refreshWorkTimeFromApi(): Promise<void> {
   if (currentScreen === "lock") broadcastWorkTimeToLockWindows();
 }
 
-/** 잠금화면 표시 중일 때 모든 잠금창(주·보조)에 최신 근태 데이터 전송 — 임시연장 카운트 등 동기화 */
+/** 잠금화면 표시 중일 때 모든 잠금창(주·보조)에 최신 근태 데이터 전송 — 임시연장 카운트 등 동기화. config.emergencyOtpSendTo 병합 포함 */
 function broadcastWorkTimeToLockWindows(): void {
-  try {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
-    }
-    for (const win of lockWindowsByDisplayId.values()) {
-      if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", lastWorkTimeData);
-    }
-  } catch (e) {
-    console.info("[PCOFF] broadcastWorkTimeToLockWindows:", String(e));
-  }
+  getLockInitialWorkPayload()
+    .then((payload) => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("pcoff:lock-initial-work", payload);
+        }
+        for (const win of lockWindowsByDisplayId.values()) {
+          if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", payload);
+        }
+      } catch (e) {
+        console.info("[PCOFF] broadcastWorkTimeToLockWindows:", String(e));
+      }
+    })
+    .catch(() => {});
 }
 
 /**
@@ -2215,7 +2265,20 @@ function applyLockScreenLeaveFromConfig(
 type ConfigForLeave = {
   leaveSeatUnlockRequirePassword?: boolean;
   lockScreen?: { leave?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string } };
+  emergencyOtpSendTo?: "SELF" | "MANAGER";
+  pcoff?: { emergencyOtpSendTo?: "SELF" | "MANAGER" };
 };
+
+/** 긴급사용 OTP 발송 대상. 잠금화면에서 안내 문구 결정용. lastWorkTimeData(API/lock-policy) 우선, 없으면 config */
+ipcMain.handle("pcoff:getEmergencyOtpSendTo", async () => {
+  const fromData = (lastWorkTimeData as Record<string, unknown>)?.emergencyOtpSendTo;
+  if (fromData === "MANAGER" || fromData === "SELF") {
+    return { emergencyOtpSendTo: fromData };
+  }
+  const config = await readJson<ConfigForLeave>(join(baseDir, PATHS.config), {});
+  const fromConfig = config.emergencyOtpSendTo ?? config.pcoff?.emergencyOtpSendTo;
+  return { emergencyOtpSendTo: fromConfig === "MANAGER" ? "MANAGER" : "SELF" };
+});
 
 ipcMain.handle("pcoff:getWorkTime", async () => {
   const config = await readJson<ConfigForLeave>(join(baseDir, PATHS.config), {});
@@ -2228,6 +2291,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     }
     applyLockScreenLeaveFromConfig(merged, config);
     applyLeaveSeatUnlockRequirePasswordFromConfig(merged, config);
+    applyEmergencyOtpSendToFromConfig(merged, config);
     return { source: "test", data: merged };
   }
   const api = await getApiClient();
@@ -2239,6 +2303,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
       applyLockScreenLeaveFromConfig(mockData, config);
     }
     applyLeaveSeatUnlockRequirePasswordFromConfig(mockData, config);
+    applyEmergencyOtpSendToFromConfig(mockData, config);
     logLoadedConfig("근태정보 (getWorkTime IPC, mock)", { source: "mock", pcOnYn: mockData.pcOnYn, screenType: mockData.screenType });
     return { source: "mock", data: mockData };
   }
@@ -2256,6 +2321,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
         merged.screenType = resolveScreenType(merged, new Date(), !!localLeaveSeatDetectedAt);
       }
       applyLeaveSeatUnlockRequirePasswordFromConfig(merged, config);
+      applyEmergencyOtpSendToFromConfig(merged, config);
       return { source: "api", data: merged };
     }
   }

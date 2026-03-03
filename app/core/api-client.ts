@@ -52,6 +52,8 @@ export interface WorkTimeResponse {
   emergencyUsePass?: string | null;
   /** 긴급사용 사유 입력 여부 */
   emergencyReasonYesNo?: "YES" | "NO";
+  /** 긴급사용 OTP 발송 대상: SELF=본인(푸시/메일/앱), MANAGER=조직장 */
+  emergencyOtpSendTo?: "SELF" | "MANAGER";
   /** 긴급사용 시작시간(YYYYMMDDHH24MI 또는 HH24MISS) */
   emergencyStaDate?: string;
   /** 긴급사용 종료시간(YYYYMMDDHH24MI 또는 HH24MISS) */
@@ -146,6 +148,8 @@ export interface TenantLockPolicy {
   };
   unlockPolicy?: {
     emergencyUnlockEnabled?: boolean;
+    /** 긴급사용 OTP 발송 대상: SELF=본인, MANAGER=조직장. lock-policy API에서 내려주면 적용 */
+    emergencyOtpSendTo?: "SELF" | "MANAGER";
     emergencyUnlockPassword?: {
       minLength?: number;
       requireComplexity?: boolean;

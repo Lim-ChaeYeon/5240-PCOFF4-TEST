@@ -276,6 +276,9 @@ async function bootstrap() {
       const response = await window.pcoffApi.getWorkTime();
       work = { ...work, ...coerceWorkTimeFromApi(response.data) };
       stateBadgeEl.textContent = `state: ${currentState} (${response.source})`;
+      if (response.source === "fallback" && response.networkFailure) {
+        showToast("네트워크 없음으로 30분 후에 PC OFF됩니다");
+      }
     } catch (error) {
       showToast(`근태정보 조회 실패: ${String(error)}`);
     }

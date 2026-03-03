@@ -1,8 +1,8 @@
 {
-  "state": "ONLINE",
-  "offlineSince": null,
-  "deadline": null,
+  "state": "OFFLINE_GRACE",
+  "offlineSince": "2026-03-03T03:00:48.783Z",
+  "deadline": "2026-03-03T03:30:48.783Z",
   "locked": false,
-  "lastRetryAt": null,
-  "retryCount": 0
+  "lastRetryAt": "2026-03-03T03:01:34.906Z",
+  "retryCount": 2
 }

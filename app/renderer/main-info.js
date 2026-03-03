@@ -163,9 +163,12 @@ function updateReflectedInfo(data) {
   }
 }
 
-function updateAttendanceInfo(data, hasError = false) {
+const NETWORK_OFFLINE_MESSAGE = "네트워크 없음으로 30분 후에 PC OFF됩니다";
+
+function updateAttendanceInfo(data, hasError = false, errorMessage = "조회 실패") {
   if (attendanceErrorEl) {
     attendanceErrorEl.classList.toggle("hidden", !hasError);
+    attendanceErrorEl.textContent = errorMessage;
   }
   if (extendCountEl) {
     extendCountEl.textContent = String(data.pcExCount ?? 0);
@@ -264,20 +267,43 @@ async function refreshAttendance(options = {}) {
 
   try {
     if (window.pcoffApi?.refreshMyAttendance) {
-      const data = await window.pcoffApi.refreshMyAttendance();
-      updateReflectedInfo(data);
-      updateAttendanceInfo(data);
+      const result = await window.pcoffApi.refreshMyAttendance();
+      if (result && result.__networkFailure) {
+        const data = result.data || {};
+        updateReflectedInfo(data);
+        updateAttendanceInfo(data, true, NETWORK_OFFLINE_MESSAGE);
+        if (!silent) showToast(NETWORK_OFFLINE_MESSAGE);
+      } else {
+        updateReflectedInfo(result);
+        updateAttendanceInfo(result);
+        if (!silent) showToast("근태정보 갱신됨");
+      }
     } else if (window.pcoffApi?.getWorkTime) {
       const response = await window.pcoffApi.getWorkTime();
       const data = response.data || {};
       updateReflectedInfo(data);
-      updateAttendanceInfo(data, response.source === "fallback");
+      const isNetworkFailure = response.source === "fallback" && response.networkFailure;
+      updateAttendanceInfo(data, response.source === "fallback", isNetworkFailure ? NETWORK_OFFLINE_MESSAGE : "조회 실패");
+      if (!silent) {
+        if (response.source !== "fallback") showToast("근태정보 갱신됨");
+        else if (isNetworkFailure) showToast(NETWORK_OFFLINE_MESSAGE);
+        else showToast("근태정보 조회 실패");
+      }
     }
-    if (!silent) showToast("근태정보 갱신됨");
   } catch (e) {
     console.error("refreshAttendance error:", e);
-    updateAttendanceInfo({}, true);
-    if (!silent) showToast("근태정보 조회 실패");
+    let isOffline = false;
+    if (window.pcoffApi?.getConnectivityState) {
+      const snap = await window.pcoffApi.getConnectivityState().catch(() => null);
+      isOffline = snap?.state === "OFFLINE_GRACE" || snap?.state === "OFFLINE_LOCKED";
+    }
+    if (isOffline) {
+      updateAttendanceInfo({}, true, NETWORK_OFFLINE_MESSAGE);
+      if (!silent) showToast(NETWORK_OFFLINE_MESSAGE);
+    } else {
+      updateAttendanceInfo({}, true);
+      if (!silent) showToast("근태정보 조회 실패");
+    }
   } finally {
     refreshInProgress = false;
     if (refreshAttendanceEl) {

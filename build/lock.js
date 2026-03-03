@@ -913,6 +913,7 @@ function showOfflineOverlay(snapshot) {
   const countdownEl = document.getElementById("offline-countdown");
   const retryBtn = document.getElementById("offline-retry-btn");
   const retryInfoEl = document.getElementById("offline-retry-info");
+  const graceUseBtn = document.getElementById("offline-grace-use-btn");
   const iconEl = document.getElementById("offline-icon");
   if (!overlay) return;
 
@@ -931,7 +932,7 @@ function showOfflineOverlay(snapshot) {
   } else if (snapshot.state === "OFFLINE_GRACE") {
     if (iconEl) iconEl.textContent = "⚠️";
     if (titleEl) titleEl.textContent = "네트워크 연결이 끊어졌습니다";
-    if (descEl) descEl.textContent = "유예 시간 내에 복구되지 않으면 PC가 잠깁니다.";
+    if (descEl) descEl.textContent = "네트워크 없음으로 30분 후에 PC OFF됩니다.";
     startOfflineCountdown(snapshot.deadline);
   }
 
@@ -952,11 +953,32 @@ function showOfflineOverlay(snapshot) {
             retryInfoEl.textContent = `재시도 ${result.snapshot?.retryCount ?? 0}회`;
           }
         }
-      } catch {
+      } catch (e) {
+        console.warn("retryConnectivity error:", e);
         showToast("재시도 실패");
       } finally {
         retryBtn.disabled = false;
         retryBtn.textContent = "다시 시도";
+      }
+    });
+  }
+
+  if (graceUseBtn && !graceUseBtn._graceUseBound) {
+    graceUseBtn._graceUseBound = true;
+    graceUseBtn.addEventListener("click", async () => {
+      if (!window.pcoffApi?.requestOfflineGraceUse) return;
+      try {
+        graceUseBtn.disabled = true;
+        const res = await window.pcoffApi.requestOfflineGraceUse();
+        if (res?.success) {
+          showToast("30분 동안 사용 가능합니다. 이후 다시 잠깁니다.");
+          hideOfflineOverlay();
+        }
+      } catch (e) {
+        console.warn("requestOfflineGraceUse error:", e);
+        showToast("요청 실패");
+      } finally {
+        graceUseBtn.disabled = false;
       }
     });
   }
@@ -1049,6 +1071,9 @@ async function bootstrap() {
       const response = await window.pcoffApi.getWorkTime();
       work = { ...work, ...coerceWorkTimeFromApi(response.data) };
       if (stateBadgeEl) stateBadgeEl.textContent = `state: ${currentState} (${response.source})`;
+      if (response.source === "fallback" && response.networkFailure) {
+        showToast("네트워크 없음으로 30분 후에 PC OFF됩니다");
+      }
     } catch (error) {
       showToast(`근태정보 조회 실패: ${String(error)}`);
     }

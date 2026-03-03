@@ -66,6 +66,11 @@ let isolationModeActive = false;
 let lastLockBlurRefocusAt = 0;
 const LOCK_BLUR_REFOCUS_DEBOUNCE_MS = 500;
 
+/** FR-17: 복구 전 사용 — 30분간 잠금 해제 후 재잠금. 만료 시각(ms) 또는 null */
+let offlineGraceUseUntil: number | null = null;
+let offlineGraceUseTimer: ReturnType<typeof setTimeout> | null = null;
+const OFFLINE_GRACE_USE_MS = 30 * 60 * 1000; // 30분
+
 // 현재 운영 모드
 type OperationMode = "NORMAL" | "TEMP_EXTEND" | "EMERGENCY_USE" | "EMERGENCY_RELEASE";
 let currentMode: OperationMode = "NORMAL";
@@ -390,27 +395,56 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   });
 }
 
-/** 보조 잠금창 전부 닫기 (해제/로그인 전환 시 호출). destroy()로 강제 제거(close 방지 우회).
- * Windows: 풀스크린 해제 후 hide()로 즉시 화면에서 제거한 뒤 destroy()하여 보조 모니터에 잠금이 남는 현상 방지. */
+/** 보조 잠금창 전부 닫기 시 플래그 — close 이벤트에서 preventDefault 하지 않도록 */
+let closingAllLockWindows = false;
+
+/** 보조 잠금창 전부 닫기 (잠금 해제/로그인/작동정보 전환 시 호출). 잠금 해제 후 보조 모니터 잠금창은 반드시 모두 제거. */
 function closeAllLockWindows(): void {
-  for (const win of lockWindowsByDisplayId.values()) {
-    if (win.isDestroyed()) continue;
-    try {
-      win.setFullScreen(false);
-      win.hide();
-    } catch {
-      // 이미 파괴 중이거나 오류 시 무시
+  if (lockWindowsByDisplayId.size === 0) return;
+  closingAllLockWindows = true;
+  try {
+    const toClose = Array.from(lockWindowsByDisplayId.entries());
+    lockWindowsByDisplayId.clear();
+    for (const [_displayId, win] of toClose) {
+      if (win.isDestroyed()) continue;
+      removeLockWindowCloseHandler(win);
+      try {
+        win.setVisibleOnAllWorkspaces(false);
+        win.setFullScreen(false);
+        win.setClosable(true);
+        win.hide();
+      } catch {
+        // 이미 파괴 중이거나 오류 시 무시
+      }
+      try {
+        if (!win.isDestroyed()) win.destroy();
+      } catch {
+        // destroy 실패 시 무시
+      }
     }
-    if (!win.isDestroyed()) win.destroy();
+  } finally {
+    setImmediate(() => {
+      closingAllLockWindows = false;
+    });
   }
-  lockWindowsByDisplayId.clear();
+}
+
+/** 보조 잠금창의 close 리스너 제거 (닫기 허용). closeAllLockWindows에서 destroy 전 호출 */
+function removeLockWindowCloseHandler(win: BrowserWindow): void {
+  const handler = (win as unknown as { _lockCloseHandler?: (e: Electron.Event) => void })._lockCloseHandler;
+  if (handler) {
+    win.removeListener("close", handler);
+    delete (win as unknown as { _lockCloseHandler?: (e: Electron.Event) => void })._lockCloseHandler;
+  }
 }
 
 /** 잠금화면 동작 부착 (닫기 차단, leave-full-screen 시 재진입, blur 시 재포커스) — 보조 잠금창용 */
 function attachLockWindowBehavior(win: BrowserWindow): void {
-  win.on("close", (e) => {
-    if (!isForceQuit && currentScreen === "lock") e.preventDefault();
-  });
+  const closeHandler = (e: Electron.Event) => {
+    if (!isForceQuit && currentScreen === "lock" && !closingAllLockWindows) e.preventDefault();
+  };
+  (win as unknown as { _lockCloseHandler?: (e: Electron.Event) => void })._lockCloseHandler = closeHandler;
+  win.on("close", closeHandler);
   win.on("leave-full-screen", () => {
     if (currentScreen === "lock" && !win.isDestroyed()) win.setFullScreen(true);
   });
@@ -434,9 +468,23 @@ function attachLockWindowBehavior(win: BrowserWindow): void {
   }
 }
 
+/** 잠금창을 모든 가상 데스크탑(Spaces)에 표시. macOS: 풀스크린 시에도 모든 스페이스에 보이도록 visibleOnFullScreen 사용 */
+function setLockWindowVisibleOnAllWorkspaces(win: BrowserWindow): void {
+  if (process.platform === "darwin") {
+    try {
+      (win.setVisibleOnAllWorkspaces as (v: boolean, o?: { visibleOnFullScreen?: boolean }) => void)(true, { visibleOnFullScreen: true });
+    } catch {
+      win.setVisibleOnAllWorkspaces(true);
+    }
+  } else {
+    win.setVisibleOnAllWorkspaces(true);
+  }
+}
+
 /** 다중 디스플레이: 주 디스플레이 제외 보조 디스플레이마다 잠금창 1개 생성·동기화 (§7·§11) */
 async function ensureLockWindowsForAllDisplays(): Promise<void> {
   if (currentScreen !== "lock") return;
+  if (offlineGraceUseUntil != null && Date.now() < offlineGraceUseUntil) return;
   const displays = screen.getAllDisplays();
   const primaryDisplay = screen.getPrimaryDisplay();
   const secondaries = displays.filter((d) => d.id !== primaryDisplay.id);
@@ -482,7 +530,7 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
         preload: getPreloadPath()
       }
     });
-    win.setVisibleOnAllWorkspaces(true);
+    setLockWindowVisibleOnAllWorkspaces(win);
     attachLockWindowBehavior(win);
     win.on("closed", () => lockWindowsByDisplayId.delete(display.id));
     win.webContents.once("did-finish-load", () => {
@@ -495,10 +543,11 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
       console.error("[PCOFF] 보조 잠금창 로드 실패:", display.id, err);
     });
     if (!win.isDestroyed() && currentScreen === "lock") {
+      setLockWindowVisibleOnAllWorkspaces(win);
       win.setBounds(display.bounds);
       win.setAlwaysOnTop(true, "screen-saver");
       win.show();
-      // 보조 디스플레이에 먼저 배치·표시한 뒤 풀스크린 → 해당 디스플레이에서 풀스크린됨 (macOS 포함)
+      // 보조 디스플레이에 먼저 배치·표시한 뒤 풀스크린 → 해당 디스플레이에서 풀스크린됨 (macOS 포함). 모든 스페이스에 표시되도록 풀스크린 직전에도 설정
       win.setFullScreen(true);
     }
     lockWindowsByDisplayId.set(display.id, win);
@@ -1031,8 +1080,9 @@ async function createLockWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "lock";
     mainWindow.setTitle("PCOFF 잠금화면");
-    mainWindow.setVisibleOnAllWorkspaces(true);
+    setLockWindowVisibleOnAllWorkspaces(mainWindow);
     const primaryDisplay = screen.getPrimaryDisplay();
+    mainWindow.setFullScreen(false);
     mainWindow.setBounds(primaryDisplay.bounds);
     mainWindow.webContents.once("did-finish-load", () => {
       if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "lock") {
@@ -1049,6 +1099,9 @@ async function createLockWindow(): Promise<void> {
       console.error("[PCOFF] 잠금화면 로드 실패:", err);
     });
     if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "lock") {
+      setLockWindowVisibleOnAllWorkspaces(mainWindow);
+      mainWindow.setFullScreen(false);
+      mainWindow.setBounds(screen.getPrimaryDisplay().bounds);
       mainWindow.show();
       mainWindow.focus();
       mainWindow.setAlwaysOnTop(true, "screen-saver");
@@ -1061,9 +1114,11 @@ async function createLockWindow(): Promise<void> {
       }
     });
     await ensureLockWindowsForAllDisplays();
-    // 디스플레이 목록 지연 대비: 500ms 후 보조 창 한 번 더 시도
+    // 디스플레이 목록 지연 대비: 500ms 후 보조 창 한 번 더 시도 (복구 전 사용 중이면 스킵)
     setTimeout(() => {
-      if (currentScreen === "lock") void ensureLockWindowsForAllDisplays();
+      if (currentScreen === "lock" && (offlineGraceUseUntil == null || Date.now() >= offlineGraceUseUntil)) {
+        void ensureLockWindowsForAllDisplays();
+      }
     }, 500);
     return;
   }
@@ -1090,7 +1145,7 @@ async function createLockWindow(): Promise<void> {
   currentScreen = "lock";
   attachMainWindowCloseHandler(win);
   attachWindowHotkeys(win);
-  win.setVisibleOnAllWorkspaces(true);
+  setLockWindowVisibleOnAllWorkspaces(win);
   win.webContents.once("did-finish-load", () => {
     if (!win.isDestroyed() && currentScreen === "lock") {
       getLockInitialWorkPayload().then((payload) => {
@@ -1111,6 +1166,7 @@ async function createLockWindow(): Promise<void> {
     console.error("[PCOFF] 잠금화면 로드 실패:", err);
   });
   if (win && !win.isDestroyed() && currentScreen === "lock") {
+    setLockWindowVisibleOnAllWorkspaces(win);
     win.show();
     win.focus();
     win.setFullScreen(true);
@@ -1122,9 +1178,11 @@ async function createLockWindow(): Promise<void> {
     }
   });
   await ensureLockWindowsForAllDisplays();
-  // 디스플레이 목록 지연(연결 직후 등) 대비: 잠금화면 표시 후 한 번 더 보조 창 생성 시도
+  // 디스플레이 목록 지연(연결 직후 등) 대비: 잠금화면 표시 후 한 번 더 보조 창 생성 시도 (복구 전 사용 중이면 스킵)
   setTimeout(() => {
-    if (currentScreen === "lock") void ensureLockWindowsForAllDisplays();
+    if (currentScreen === "lock" && (offlineGraceUseUntil == null || Date.now() >= offlineGraceUseUntil)) {
+      void ensureLockWindowsForAllDisplays();
+    }
   }, 500);
 }
 
@@ -1167,8 +1225,9 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
   mainWindow = win;
   currentScreen = "lock";
   win.setTitle("PCOFF 잠금화면");
-  win.setVisibleOnAllWorkspaces(true);
+  setLockWindowVisibleOnAllWorkspaces(win);
   const primaryDisplay = screen.getPrimaryDisplay();
+  win.setFullScreen(false);
   win.setBounds(primaryDisplay.bounds);
   win.webContents.once("did-finish-load", () => {
     if (!win.isDestroyed() && currentScreen === "lock") {
@@ -1185,6 +1244,9 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
     console.error("[PCOFF] 잠금화면 로드 실패 (showLockInWindow):", err);
   });
   if (win && !win.isDestroyed() && currentScreen === "lock") {
+    setLockWindowVisibleOnAllWorkspaces(win);
+    win.setFullScreen(false);
+    win.setBounds(screen.getPrimaryDisplay().bounds);
     win.show();
     win.focus();
     win.setAlwaysOnTop(true, "screen-saver");
@@ -1197,9 +1259,11 @@ async function showLockInWindow(win: BrowserWindow): Promise<void> {
     }
   });
   await ensureLockWindowsForAllDisplays();
-  // 디스플레이 목록 지연(연결 직후 등) 대비: 잠금화면 표시 후 한 번 더 보조 창 생성 시도
+  // 디스플레이 목록 지연(연결 직후 등) 대비: 잠금화면 표시 후 한 번 더 보조 창 생성 시도 (복구 전 사용 중이면 스킵)
   setTimeout(() => {
-    if (currentScreen === "lock") void ensureLockWindowsForAllDisplays();
+    if (currentScreen === "lock" && (offlineGraceUseUntil == null || Date.now() >= offlineGraceUseUntil)) {
+      void ensureLockWindowsForAllDisplays();
+    }
   }, 500);
 }
 
@@ -1627,13 +1691,44 @@ async function isLockRequired(): Promise<boolean> {
     // 서버 HTTP 4xx/5xx는 통신 성공 → 오프라인 아님. 네트워크 오류일 때만 오프라인으로 보고
     const msg = err instanceof Error ? err.message : String(err);
     const isHttpError = /\bfailed:\s*[45]\d{2}\b/.test(msg);
-    if (!isHttpError) void offlineManager.reportApiFailure("api");
+    if (!isHttpError) {
+      void offlineManager.reportApiFailure("api");
+      if (Object.keys(lastWorkTimeData).length === 0) {
+        lastWorkTimeData = buildMockWorkTime() as Record<string, unknown>;
+        applyResolvedScreenType(lastWorkTimeData);
+      }
+      // 네트워크 없을 때는 잠금화면(오프라인 유예) 표시 — 작동정보 풀스크린으로 뜨는 현상 방지
+      return true;
+    }
     return false;
   }
 }
 
 /** 잠금 필요 시 잠금화면 표시. reuseWindow 있으면 그 창에 로드(새 창 X). 이미 잠금화면이면 reload 하지 않음(팝업 유지). */
 async function checkLockAndShowLockWindow(reuseWindow?: BrowserWindow | null): Promise<boolean> {
+  if (offlineGraceUseUntil != null && Date.now() < offlineGraceUseUntil) return false;
+  if (offlineManager.state === "OFFLINE_GRACE" || offlineManager.state === "OFFLINE_LOCKED") {
+    if (reuseWindow && !reuseWindow.isDestroyed()) {
+      if (currentScreen !== "lock") {
+        await showLockInWindow(reuseWindow);
+        await ensureLockWindowsForAllDisplays();
+        reuseWindow.show();
+        reuseWindow.focus();
+      }
+      return true;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (currentScreen !== "lock") {
+        await showLockInWindow(mainWindow);
+        await ensureLockWindowsForAllDisplays();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      return true;
+    }
+    void createLockWindow();
+    return true;
+  }
   const locked = await isLockRequired();
   if (!locked) return false;
   const screenType = (lastWorkTimeData.screenType ?? "off") as string;
@@ -1893,18 +1988,35 @@ app.whenReady().then(async () => {
   });
   await emergencyUnlockManager.restore();
 
+  // FR-17: 오프라인 상태 변경 시 잠금창 포함 모든 창에 브로드캐스트 (다시 시도 후 복구 시 오버레이 숨김)
+  function broadcastConnectivityChanged(state: ConnectivityState): void {
+    const targets: Electron.WebContents[] = [];
+    if (mainWindow && !mainWindow.isDestroyed()) targets.push(mainWindow.webContents);
+    for (const win of lockWindowsByDisplayId.values()) {
+      if (win && !win.isDestroyed()) targets.push(win.webContents);
+    }
+    for (const wc of targets) {
+      try {
+        wc.send("pcoff:connectivity-changed", { state });
+      } catch {
+        // 이미 파괴 중이면 무시
+      }
+    }
+  }
+
   // FR-17: Offline Manager 초기화 — heartbeat/API 실패 기반 오프라인 감지·유예·잠금
   offlineManager = new OfflineManager(baseDir, logger);
   offlineManager.setOnStateChange((state: ConnectivityState) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("pcoff:connectivity-changed", { state });
-    }
+    broadcastConnectivityChanged(state);
+    if (offlineGraceUseUntil != null && Date.now() < offlineGraceUseUntil) return;
     if (state === "OFFLINE_GRACE" || state === "OFFLINE_LOCKED") {
       if (mainWindow && !mainWindow.isDestroyed()) {
         void showLockInWindow(mainWindow).then(() => {
           mainWindow?.show();
           mainWindow?.focus();
         });
+      } else if (mainWindow === null) {
+        // 앱 기동 직후 창 미생성 — checkLockAndShowLockWindow()에서 잠금 표시 (중복·모니터 전환 방지)
       } else {
         void createLockWindow().then(() => {
           mainWindow?.show();
@@ -1918,6 +2030,13 @@ app.whenReady().then(async () => {
     }
   });
   await offlineManager.restore();
+
+  if (offlineManager.state === "OFFLINE_GRACE" || offlineManager.state === "OFFLINE_LOCKED") {
+    const recovered = await offlineManager.retryConnectivity(connectivityHealthCheck);
+    if (recovered) {
+      console.info("[PCOFF] 기동 시 연결 확인 — 네트워크 복구됨, 캐시된 오프라인 상태 해제");
+    }
+  }
 
   // FR-08: Ops Observer 시작 (heartbeat + 로그 서버 전송)
   observer.setCallbacks({
@@ -1940,8 +2059,9 @@ app.whenReady().then(async () => {
     console.error("[PCOFF] Tray creation failed:", err);
   }
 
-  // §7·§11 다중 디스플레이: 핫플러그 시 보조 잠금창 동기화
+  // §7·§11 다중 디스플레이: 핫플러그 시 보조 잠금창 동기화 (복구 전 사용 기간 중에는 생성하지 않음)
   screen.on("display-added", () => {
+    if (offlineGraceUseUntil != null && Date.now() < offlineGraceUseUntil) return;
     if (currentScreen === "lock") void ensureLockWindowsForAllDisplays();
   });
   screen.on("display-removed", (_event, display) => {
@@ -2103,6 +2223,11 @@ app.on("before-quit", async (e) => {
   stopLockCheckInterval();
   leaveSeatDetector.stop();
   leaveSeatReporter?.stop();
+  if (offlineGraceUseTimer) {
+    clearTimeout(offlineGraceUseTimer);
+    offlineGraceUseTimer = null;
+  }
+  offlineGraceUseUntil = null;
   offlineManager?.stop();
   emergencyUnlockManager?.stop();
   observer?.stop();
@@ -2424,6 +2549,9 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
     return { source: "api", data: merged };
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "getPcOffWorkTime", error: String(error) });
+    const msg = error instanceof Error ? error.message : String(error);
+    const isHttpError = /\bfailed:\s*[45]\d{2}\b/.test(msg);
+    if (!isHttpError) void offlineManager.reportApiFailure("api");
     const fallbackData = buildMockWorkTime() as Record<string, unknown>;
     if (localLeaveSeatDetectedAt) {
       fallbackData.screenType = "empty";
@@ -2457,7 +2585,7 @@ ipcMain.handle("pcoff:getWorkTime", async () => {
       // ignore
     }
     applyLeaveSeatUnlockRequirePasswordFromConfig(fallbackData, config);
-    return { source: "fallback", data: fallbackData, error: String(error) };
+    return { source: "fallback", data: fallbackData, error: String(error), networkFailure: !isHttpError };
   }
 });
 
@@ -2915,7 +3043,37 @@ ipcMain.handle("pcoff:refreshMyAttendance", async () => {
     return data;
   } catch (error) {
     await logger.write(LOG_CODES.OFFLINE_DETECTED, "WARN", { step: "refreshMyAttendance", error: String(error) });
-    throw error;
+    const msg = error instanceof Error ? error.message : String(error);
+    const isHttpError = /\bfailed:\s*[45]\d{2}\b/.test(msg);
+    if (!isHttpError) void offlineManager.reportApiFailure("api");
+    const fallbackData = buildMockWorkTime() as Record<string, unknown>;
+    if (localLeaveSeatDetectedAt) {
+      fallbackData.screenType = "empty";
+      fallbackData.leaveSeatOffInputMath = formatYmdHm(localLeaveSeatDetectedAt);
+    }
+    try {
+      const cfg = await readJson<{
+        lockScreen?: {
+          before?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
+          off?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
+          leave?: { title?: string; message?: string; backgroundUrl?: string; logoUrl?: string };
+        };
+      }>(join(baseDir, PATHS.config), {});
+      const ls = cfg.lockScreen;
+      if (ls) {
+        if (ls.before?.title) fallbackData.lockScreenBeforeTitle = ls.before.title;
+        if (ls.before?.message) fallbackData.lockScreenBeforeMessage = ls.before.message;
+        if (ls.off?.title) fallbackData.lockScreenOffTitle = ls.off.title;
+        if (ls.off?.message) fallbackData.lockScreenOffMessage = ls.off.message;
+        if (ls.leave?.title) fallbackData.lockScreenLeaveTitle = ls.leave.title;
+        if (ls.leave?.message) fallbackData.lockScreenLeaveMessage = ls.leave.message;
+      }
+    } catch {
+      // ignore
+    }
+    const configForLeave = await readJson<ConfigForLeave>(join(baseDir, PATHS.config), {});
+    applyLeaveSeatUnlockRequirePasswordFromConfig(fallbackData, configForLeave);
+    return { __networkFailure: true, data: fallbackData };
   }
 });
 
@@ -3077,19 +3235,66 @@ ipcMain.handle("pcoff:getConnectivityState", async () => {
   return offlineManager.getSnapshot();
 });
 
-ipcMain.handle("pcoff:retryConnectivity", async () => {
-  const recovered = await offlineManager.retryConnectivity(async () => {
-    const baseUrl = await getApiBaseUrl(baseDir);
-    if (!baseUrl) return false;
+/** 연결 가능 여부 확인 (재시도·기동 시 캐시 오프라인 해제용) */
+async function connectivityHealthCheck(): Promise<boolean> {
+  const baseUrl = await getApiBaseUrl(baseDir);
+  if (!baseUrl) return false;
+  try {
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/reportAgentEvents.do`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events: [], deviceId: "probe", sessionId: "probe" }),
       signal: AbortSignal.timeout(10_000)
     });
-    return res.ok;
-  });
+    if (res.ok) return true;
+  } catch {
+    // reportAgentEvents 실패 시 getPcOffWorkTime으로 서버 도달 여부 재확인
+  }
+  const api = await getApiClient();
+  if (!api) return false;
+  try {
+    await api.getPcOffWorkTime();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle("pcoff:retryConnectivity", async () => {
+  const recovered = await offlineManager.retryConnectivity(connectivityHealthCheck);
   return { recovered, snapshot: offlineManager.getSnapshot() };
+});
+
+/** FR-17: 복구 전 사용 — 30분간 잠금화면 해제 후 재잠금. OFFLINE_GRACE/OFFLINE_LOCKED일 때만 동작 */
+function startOfflineGraceUse(): void {
+  const state = offlineManager.state;
+  if (state !== "OFFLINE_GRACE" && state !== "OFFLINE_LOCKED") return;
+  if (offlineGraceUseTimer) {
+    clearTimeout(offlineGraceUseTimer);
+    offlineGraceUseTimer = null;
+  }
+  offlineGraceUseUntil = Date.now() + OFFLINE_GRACE_USE_MS;
+  void logger.write(LOG_CODES.OFFLINE_GRACE_STARTED, "INFO", { reason: "user_request_use_before_recovery", durationMin: 30 });
+  currentScreen = "tray-info";
+  closeAllLockWindows();
+  showTrayInfoInCurrentWindow();
+  offlineGraceUseTimer = setTimeout(() => {
+    offlineGraceUseTimer = null;
+    offlineGraceUseUntil = null;
+    if (currentScreen !== "lock" && mainWindow && !mainWindow.isDestroyed()) {
+      currentScreen = "lock";
+      void showLockInWindow(mainWindow).then(() => {
+        mainWindow?.show();
+        mainWindow?.focus();
+        void ensureLockWindowsForAllDisplays();
+      });
+    }
+  }, OFFLINE_GRACE_USE_MS);
+}
+
+ipcMain.handle("pcoff:requestOfflineGraceUse", async () => {
+  startOfflineGraceUse();
+  return { success: true, durationMin: 30 };
 });
 
 /** 원본 WebView와 동일: 긴급해제 비밀번호 검증용 PHP URL. sendLockPassUrl 설정이 있으면 사용, 없으면 lockScreenApiUrl에서 도메인만 추출해 /Includes/sendLockPass.php 로 반환 */

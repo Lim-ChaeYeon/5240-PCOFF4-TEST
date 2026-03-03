@@ -98,6 +98,28 @@ body {
   color: var(--text); padding: 10px 14px; border-radius: 999px; display: none;
 }
 .toast.show { display: block; }
+
+/* 잠금화면: PC-ON/PC-OFF/임시연장 등 API 처리 중 프로그레스 */
+.action-progress-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 999;
+}
+.action-progress-overlay.hidden { display: none !important; }
+.action-progress-box {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px 32px; min-width: 200px; text-align: center;
+}
+.action-progress-bar {
+  height: 4px; background: rgba(255, 255, 255, 0.15); border-radius: 2px; overflow: hidden; margin-bottom: 12px;
+}
+.action-progress-bar::after {
+  content: ""; display: block; height: 100%; width: 40%; background: var(--primary, #3b82f6); border-radius: 2px;
+  animation: action-progress-shine 1s ease-in-out infinite;
+}
+@keyframes action-progress-shine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+.action-progress-text { margin: 0; font-size: 14px; color: var(--muted); }
+
 .hidden { display: none !important; }
 
 .login-view { min-height: 100%; padding: 28px; }

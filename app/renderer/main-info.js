@@ -344,23 +344,55 @@ function syncTestModeDrawerFromState(state) {
   syncTestModeDrawerInputsFromState(state.overrides || {});
 }
 
-function syncTestModeDrawerInputsFromState(overrides) {
+/** @param {Record<string, unknown>} overrides
+ *  @param {{ patchOnly?: boolean }} [opts] patchOnly: true면 overrides에 있는 키만 갱신(프리셋 선택 시 잠금화면 문구 등 기존 값 유지)
+ */
+function syncTestModeDrawerInputsFromState(overrides, opts) {
+  const patchOnly = opts?.patchOnly === true;
   const set = (id, val) => {
     const el = document.getElementById(id);
     if (!el) return;
     if (val === undefined || val === null) return;
     el.value = val === "" ? "" : String(val);
   };
-  set("test-pcOnYmdTime", overrides.pcOnYmdTime ?? "");
-  set("test-pcOffYmdTime", overrides.pcOffYmdTime ?? "");
-  set("test-pcExCount", overrides.pcExCount ?? "");
-  set("test-pcExMaxCount", overrides.pcExMaxCount ?? "");
-  set("test-pcExTime", overrides.pcExTime ?? "");
-  set("test-leaveSeatUseYn", overrides.leaveSeatUseYn ?? "");
-  set("test-leaveSeatTime", overrides.leaveSeatTime ?? "");
-  set("test-leaveSeatReasonYn", overrides.leaveSeatReasonYn ?? "");
-  set("test-leaveSeatReasonManYn", overrides.leaveSeatReasonManYn ?? "");
-  set("test-pcoffEmergencyYesNo", overrides.pcoffEmergencyYesNo ?? "");
+  const setIf = (key, val) => {
+    if (patchOnly && !(key in overrides)) return;
+    set("test-" + key, overrides[key] ?? "");
+  };
+  const allKeys = ["pcOnYmdTime", "pcOffYmdTime", "pcExCount", "pcExMaxCount", "pcExTime", "leaveSeatUseYn", "leaveSeatTime", "leaveSeatReasonYn", "leaveSeatReasonManYn", "pcoffEmergencyYesNo",
+    "lockScreenBeforeTitle", "lockScreenBeforeMessage", "lockScreenBeforeBackground", "lockScreenBeforeLogo", "lockScreenOffTitle", "lockScreenOffMessage", "lockScreenOffBackground", "lockScreenOffLogo", "lockScreenLeaveTitle", "lockScreenLeaveMessage", "lockScreenLeaveBackground", "lockScreenLeaveLogo"];
+  allKeys.forEach((k) => setIf(k, overrides[k]));
+}
+
+/** Drawer 입력값에서 overrides 객체 수집 (시간·근태·잠금화면 문구·리소스) */
+function collectOverridesFromDrawer() {
+  const overrides = {};
+  const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
+  const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
+  if (rawPcOn && /^\d{12}$/.test(rawPcOn)) overrides.pcOnYmdTime = rawPcOn;
+  if (rawPcOff && /^\d{12}$/.test(rawPcOff)) overrides.pcOffYmdTime = rawPcOff;
+  const pcExCount = document.getElementById("test-pcExCount")?.value?.trim();
+  if (pcExCount !== "") overrides.pcExCount = parseInt(pcExCount, 10);
+  const pcExMaxCount = document.getElementById("test-pcExMaxCount")?.value?.trim();
+  if (pcExMaxCount !== "") overrides.pcExMaxCount = parseInt(pcExMaxCount, 10);
+  const pcExTime = document.getElementById("test-pcExTime")?.value?.trim();
+  if (pcExTime !== "") overrides.pcExTime = parseInt(pcExTime, 10);
+  const leaveSeatUseYn = document.getElementById("test-leaveSeatUseYn")?.value;
+  if (leaveSeatUseYn) overrides.leaveSeatUseYn = leaveSeatUseYn;
+  const leaveSeatTime = document.getElementById("test-leaveSeatTime")?.value?.trim();
+  if (leaveSeatTime !== "") overrides.leaveSeatTime = parseInt(leaveSeatTime, 10);
+  const leaveSeatReasonYn = document.getElementById("test-leaveSeatReasonYn")?.value;
+  if (leaveSeatReasonYn) overrides.leaveSeatReasonYn = leaveSeatReasonYn;
+  const leaveSeatReasonManYn = document.getElementById("test-leaveSeatReasonManYn")?.value;
+  if (leaveSeatReasonManYn) overrides.leaveSeatReasonManYn = leaveSeatReasonManYn;
+  const pcoffEmergencyYesNo = document.getElementById("test-pcoffEmergencyYesNo")?.value;
+  if (pcoffEmergencyYesNo) overrides.pcoffEmergencyYesNo = pcoffEmergencyYesNo;
+  const lockKeys = ["lockScreenBeforeTitle", "lockScreenBeforeMessage", "lockScreenBeforeBackground", "lockScreenBeforeLogo", "lockScreenOffTitle", "lockScreenOffMessage", "lockScreenOffBackground", "lockScreenOffLogo", "lockScreenLeaveTitle", "lockScreenLeaveMessage", "lockScreenLeaveBackground", "lockScreenLeaveLogo"];
+  lockKeys.forEach((k) => {
+    const v = document.getElementById("test-" + k)?.value?.trim();
+    if (v) overrides[k] = v;
+  });
+  return overrides;
 }
 
 /** 프리셋별 폼 채우기용 값 (Main TEST_PRESETS와 동기화) */
@@ -404,40 +436,17 @@ async function setupTestModeDrawer() {
 
   if (testApplyOverridesEl && window.pcoffApi?.setTestModeState) {
     testApplyOverridesEl.addEventListener("click", async () => {
-      const overrides = {};
       const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
       const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
-      if (rawPcOn) {
-        if (!/^\d{12}$/.test(rawPcOn)) {
-          showToast("시업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
-          return;
-        }
-        overrides.pcOnYmdTime = rawPcOn;
+      if (rawPcOn && !/^\d{12}$/.test(rawPcOn)) {
+        showToast("시업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+        return;
       }
-      if (rawPcOff) {
-        if (!/^\d{12}$/.test(rawPcOff)) {
-          showToast("종업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
-          return;
-        }
-        overrides.pcOffYmdTime = rawPcOff;
+      if (rawPcOff && !/^\d{12}$/.test(rawPcOff)) {
+        showToast("종업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+        return;
       }
-      const pcExCount = document.getElementById("test-pcExCount")?.value?.trim();
-      if (pcExCount !== "") overrides.pcExCount = parseInt(pcExCount, 10);
-      const pcExMaxCount = document.getElementById("test-pcExMaxCount")?.value?.trim();
-      if (pcExMaxCount !== "") overrides.pcExMaxCount = parseInt(pcExMaxCount, 10);
-      const pcExTime = document.getElementById("test-pcExTime")?.value?.trim();
-      if (pcExTime !== "") overrides.pcExTime = parseInt(pcExTime, 10);
-      const leaveSeatUseYn = document.getElementById("test-leaveSeatUseYn")?.value;
-      if (leaveSeatUseYn) overrides.leaveSeatUseYn = leaveSeatUseYn;
-      const leaveSeatTime = document.getElementById("test-leaveSeatTime")?.value?.trim();
-      if (leaveSeatTime !== "") overrides.leaveSeatTime = parseInt(leaveSeatTime, 10);
-      const leaveSeatReasonYn = document.getElementById("test-leaveSeatReasonYn")?.value;
-      if (leaveSeatReasonYn) overrides.leaveSeatReasonYn = leaveSeatReasonYn;
-      const leaveSeatReasonManYn = document.getElementById("test-leaveSeatReasonManYn")?.value;
-      if (leaveSeatReasonManYn) overrides.leaveSeatReasonManYn = leaveSeatReasonManYn;
-      const pcoffEmergencyYesNo = document.getElementById("test-pcoffEmergencyYesNo")?.value;
-      if (pcoffEmergencyYesNo) overrides.pcoffEmergencyYesNo = pcoffEmergencyYesNo;
-
+      const overrides = collectOverridesFromDrawer();
       try {
         const state = await window.pcoffApi.getTestModeState();
         const merged = { ...(state.overrides || {}), ...overrides };
@@ -482,49 +491,27 @@ async function setupTestModeDrawer() {
       const preset = PRESET_FORM_VALUES[name];
       if (testForceScreenEl && preset.forceScreenType) testForceScreenEl.value = preset.forceScreenType;
       if (testForceModeEl && preset.forceOperationMode) testForceModeEl.value = preset.forceOperationMode;
-      syncTestModeDrawerInputsFromState(preset.overrides || {});
+      // patchOnly: true → 프리셋에 있는 필드만 갱신, 잠금화면 문구·리소스 등 기존 입력값 유지
+      syncTestModeDrawerInputsFromState(preset.overrides || {}, { patchOnly: true });
       showToast("프리셋 선택됨. [시작]을 눌러 적용하세요.");
     });
   });
 
   if (testStartBtnEl && window.pcoffApi?.setTestModeState) {
     testStartBtnEl.addEventListener("click", async () => {
-      const forceScreenType = testForceScreenEl?.value || "AUTO";
-      const forceOperationMode = testForceModeEl?.value || "AUTO";
-      const overrides = {};
       const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
       const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
-      if (rawPcOn) {
-        if (!/^\d{12}$/.test(rawPcOn)) {
-          showToast("시업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
-          return;
-        }
-        overrides.pcOnYmdTime = rawPcOn;
+      if (rawPcOn && !/^\d{12}$/.test(rawPcOn)) {
+        showToast("시업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+        return;
       }
-      if (rawPcOff) {
-        if (!/^\d{12}$/.test(rawPcOff)) {
-          showToast("종업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
-          return;
-        }
-        overrides.pcOffYmdTime = rawPcOff;
+      if (rawPcOff && !/^\d{12}$/.test(rawPcOff)) {
+        showToast("종업 시간은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+        return;
       }
-      const pcExCount = document.getElementById("test-pcExCount")?.value?.trim();
-      if (pcExCount !== "") overrides.pcExCount = parseInt(pcExCount, 10);
-      const pcExMaxCount = document.getElementById("test-pcExMaxCount")?.value?.trim();
-      if (pcExMaxCount !== "") overrides.pcExMaxCount = parseInt(pcExMaxCount, 10);
-      const pcExTime = document.getElementById("test-pcExTime")?.value?.trim();
-      if (pcExTime !== "") overrides.pcExTime = parseInt(pcExTime, 10);
-      const leaveSeatUseYn = document.getElementById("test-leaveSeatUseYn")?.value;
-      if (leaveSeatUseYn) overrides.leaveSeatUseYn = leaveSeatUseYn;
-      const leaveSeatTime = document.getElementById("test-leaveSeatTime")?.value?.trim();
-      if (leaveSeatTime !== "") overrides.leaveSeatTime = parseInt(leaveSeatTime, 10);
-      const leaveSeatReasonYn = document.getElementById("test-leaveSeatReasonYn")?.value;
-      if (leaveSeatReasonYn) overrides.leaveSeatReasonYn = leaveSeatReasonYn;
-      const leaveSeatReasonManYn = document.getElementById("test-leaveSeatReasonManYn")?.value;
-      if (leaveSeatReasonManYn) overrides.leaveSeatReasonManYn = leaveSeatReasonManYn;
-      const pcoffEmergencyYesNo = document.getElementById("test-pcoffEmergencyYesNo")?.value;
-      if (pcoffEmergencyYesNo) overrides.pcoffEmergencyYesNo = pcoffEmergencyYesNo;
-
+      const forceScreenType = testForceScreenEl?.value || "AUTO";
+      const forceOperationMode = testForceModeEl?.value || "AUTO";
+      const overrides = collectOverridesFromDrawer();
       try {
         await window.pcoffApi.setTestModeState({ forceScreenType, forceOperationMode, overrides });
         await refreshAfterTestModeChange();

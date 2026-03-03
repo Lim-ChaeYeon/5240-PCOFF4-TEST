@@ -366,7 +366,7 @@
       </div>
       <div class="drawer-section">
         <h2>시간·근태 값 입력</h2>
-        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">입력 후 [값 적용]으로 동작 여부 테스트</p>
+        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">입력 후 [값 적용]으로 동작 여부 테스트. <strong>강제 화면</strong>을 시업 전/종업/이석로 두면 시간과 무관하게 그 화면으로 동작하고, <strong>AUTO</strong>일 때만 현재 시각·exCountRenewal 기준으로 시업 전/종업이 구분됩니다.</p>
         <label for="test-pcOnYmdTime">시업 시간 (YYYYMMDDHHmm 12자리)</label>
         <input type="text" id="test-pcOnYmdTime" placeholder="202602270830" maxlength="12" inputmode="numeric" pattern="[0-9]*" />
         <label for="test-pcOffYmdTime">종업 시간 (YYYYMMDDHHmm 12자리)</label>
@@ -404,6 +404,25 @@
           <option value="NO">NO</option>
         </select>
         <button type="button" id="test-apply-overrides" class="apply-overrides-btn">값 적용</button>
+      </div>
+      <div class="drawer-section">
+        <h2>잠금화면 문구·리소스 (선택)</h2>
+        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">테스트 시 잠금화면 제목·문구·배경·로고 URL override. 비우면 서버/config 값 사용.</p>
+        <p style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">시업 전</p>
+        <input type="text" id="test-lockScreenBeforeTitle" placeholder="제목" />
+        <input type="text" id="test-lockScreenBeforeMessage" placeholder="안내 문구" />
+        <input type="text" id="test-lockScreenBeforeBackground" placeholder="배경 URL" />
+        <input type="text" id="test-lockScreenBeforeLogo" placeholder="로고 URL" />
+        <p style="font-size: 11px; font-weight: 600; margin: 8px 0 4px;">종업</p>
+        <input type="text" id="test-lockScreenOffTitle" placeholder="제목" />
+        <input type="text" id="test-lockScreenOffMessage" placeholder="안내 문구" />
+        <input type="text" id="test-lockScreenOffBackground" placeholder="배경 URL" />
+        <input type="text" id="test-lockScreenOffLogo" placeholder="로고 URL" />
+        <p style="font-size: 11px; font-weight: 600; margin: 8px 0 4px;">이석</p>
+        <input type="text" id="test-lockScreenLeaveTitle" placeholder="제목" />
+        <input type="text" id="test-lockScreenLeaveMessage" placeholder="안내 문구" />
+        <input type="text" id="test-lockScreenLeaveBackground" placeholder="배경 URL" />
+        <input type="text" id="test-lockScreenLeaveLogo" placeholder="로고 URL" />
       </div>
       <div class="drawer-section">
         <h2>프리셋</h2>

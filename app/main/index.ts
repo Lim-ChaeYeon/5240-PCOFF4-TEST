@@ -123,6 +123,8 @@ type TestForceOperationMode = "AUTO" | OperationMode;
 let testModeForceScreenType: TestForceScreenType = "AUTO";
 let testModeForceOperationMode: TestForceOperationMode = "AUTO";
 let testModeBypassApi = true;
+/** 테스트 모드에서 [시작]으로 잠금 타입(BEFORE/OFF/EMPTY)을 적용했을 때만 true. ON만 하고 시작 안 누른 상태에서는 주기 검사에서 잠금 안 함 */
+let testModeLockIntent = false;
 
 /** 테스트 오버라이드를 base에 병합. base는 변경하지 않고 새 객체 반환 */
 function mergeTestOverrides(base: Record<string, unknown>): Record<string, unknown> {
@@ -397,14 +399,19 @@ function getRendererUrl(htmlFile: string): string {
   return `app://./app/renderer/${htmlFile}`;
 }
 
-/** 창에 HTML 로드 — 맥 패키징 시 app://, 그 외 loadFile. 반환 Promise로 catch 가능 */
-function loadRendererInWindow(win: BrowserWindow, htmlFile: string): Promise<void> {
+/** 창에 HTML 로드 — 맥 패키징 시 app://, 그 외 loadFile. query 있으면 URL/loadFile 옵션에 반영 (보조 잠금창 등). 반환 Promise로 catch 가능 */
+function loadRendererInWindow(win: BrowserWindow, htmlFile: string, options?: { query?: Record<string, string> }): Promise<void> {
   const pathOrUrl = process.platform === "darwin" && app.isPackaged
     ? getRendererUrl(htmlFile)
     : getRendererPath(htmlFile);
-  const p = process.platform === "darwin" && app.isPackaged
-    ? win.loadURL(pathOrUrl as string)
-    : win.loadFile(pathOrUrl as string);
+  const query = options?.query;
+  let p: Promise<void>;
+  if (process.platform === "darwin" && app.isPackaged) {
+    const url = query ? `${pathOrUrl}?${new URLSearchParams(query).toString()}` : (pathOrUrl as string);
+    p = win.loadURL(url);
+  } else {
+    p = query ? win.loadFile(pathOrUrl as string, { query }) : win.loadFile(pathOrUrl as string);
+  }
   return p.catch((err) => {
     console.error("[PCOFF] loadRendererInWindow failed:", htmlFile, pathOrUrl, err);
     throw err;
@@ -488,34 +495,49 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
 /** 보조 잠금창 전부 닫기 시 플래그 — close 이벤트에서 preventDefault 하지 않도록 */
 let closingAllLockWindows = false;
 
-/** 보조 잠금창 전부 닫기 (잠금 해제/로그인/작동정보 전환 시 호출). 잠금 해제 후 보조 모니터 잠금창은 반드시 모두 제거. */
+/** 보조 잠금창 닫을 때 풀스크린 해제 후 destroy까지 대기(ms). Windows·macOS 모두 풀스크린 해제 완료 후 제거되도록 보수적으로 300ms 적용 */
+const CLOSE_LOCK_WINDOWS_DESTROY_DELAY_MS = 300;
+
+/** 보조 잠금창 전부 닫기 (잠금 해제/로그인/작동정보 전환 시 호출). 잠금 해제 후 보조 모니터 잠금창은 반드시 모두 제거.
+ * destroy는 지연 후 실행. closingAllLockWindows는 지연 destroy 모두 끝난 뒤에만 false로 — 그 전에 false 되면 close 핸들러가 preventDefault 해서 맥 등에서 창이 안 사라짐 */
 function closeAllLockWindows(): void {
   if (lockWindowsByDisplayId.size === 0) return;
   closingAllLockWindows = true;
-  try {
-    const toClose = Array.from(lockWindowsByDisplayId.entries());
-    lockWindowsByDisplayId.clear();
-    for (const [_displayId, win] of toClose) {
-      if (win.isDestroyed()) continue;
-      removeLockWindowCloseHandler(win);
-      try {
-        win.setVisibleOnAllWorkspaces(false);
-        win.setFullScreen(false);
-        win.setClosable(true);
-        win.hide();
-      } catch {
-        // 이미 파괴 중이거나 오류 시 무시
-      }
-      try {
-        if (!win.isDestroyed()) win.destroy();
-      } catch {
-        // destroy 실패 시 무시
-      }
+  const toClose = Array.from(lockWindowsByDisplayId.entries());
+  lockWindowsByDisplayId.clear();
+  const toDestroy = toClose.filter(([, w]) => !w.isDestroyed());
+  if (toDestroy.length === 0) {
+    closingAllLockWindows = false;
+    return;
+  }
+  const destroyOne = (w: BrowserWindow) => {
+    try {
+      if (w.isDestroyed()) return;
+      w.removeAllListeners("close");
+      w.destroy();
+    } catch {
+      // destroy 실패 시 무시
     }
-  } finally {
-    setImmediate(() => {
-      closingAllLockWindows = false;
-    });
+  };
+  let remaining = toDestroy.length;
+  const onDestroyDone = () => {
+    remaining--;
+    if (remaining <= 0) setImmediate(() => { closingAllLockWindows = false; });
+  };
+  for (const [_displayId, win] of toDestroy) {
+    removeLockWindowCloseHandler(win);
+    try {
+      win.setVisibleOnAllWorkspaces(false);
+      win.setFullScreen(false);
+      win.setClosable(true);
+      win.hide();
+    } catch {
+      // 이미 파괴 중이거나 오류 시 무시
+    }
+    setTimeout(() => {
+      destroyOne(win);
+      onDestroyDone();
+    }, CLOSE_LOCK_WINDOWS_DESTROY_DELAY_MS);
   }
 }
 
@@ -594,7 +616,7 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
       else {
         getLockInitialWorkPayload().then((payload) => {
           try {
-            existing.webContents.send("pcoff:lock-initial-work", payload);
+            existing.webContents.send("pcoff:lock-initial-work", { ...payload, isSecondary: true });
           } catch {
             // 이미 파괴 중이면 무시
           }
@@ -626,10 +648,10 @@ async function ensureLockWindowsForAllDisplays(): Promise<void> {
     win.webContents.once("did-finish-load", () => {
       if (win.isDestroyed() || currentScreen !== "lock") return;
       getLockInitialWorkPayload().then((payload) => {
-        if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", payload);
+        if (!win.isDestroyed()) win.webContents.send("pcoff:lock-initial-work", { ...payload, isSecondary: true });
       }).catch(() => {});
     });
-    await loadRendererInWindow(win, "lock.html").catch((err) => {
+    await loadRendererInWindow(win, "lock.html", { query: { secondary: "1" } }).catch((err) => {
       console.error("[PCOFF] 보조 잠금창 로드 실패:", display.id, err);
     });
     if (!win.isDestroyed() && currentScreen === "lock") {
@@ -684,6 +706,7 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
     testModeForceScreenType = "AUTO";
     testModeForceOperationMode = "AUTO";
     testModeOverrides = {};
+    testModeLockIntent = false;
     lastWorkTimeFetchedAt = null;
     void saveTestModeState();
     broadcastTestModeChanged();
@@ -702,6 +725,7 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
     void createTrayInfoWindow();
     return;
   }
+  // Windows: 잠금 해제 시 풀스크린이 아닌 디폴트 크기(620×840)로 표시
   mainWindow.setFullScreen(false);
   mainWindow.setAlwaysOnTop(false);
   mainWindow.setVisibleOnAllWorkspaces(false);
@@ -713,6 +737,14 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
   mainWindow.setAlwaysOnTop(true);
   mainWindow.setAlwaysOnTop(false);
   const win = mainWindow;
+  if (process.platform === "win32") {
+    setImmediate(() => {
+      if (win.isDestroyed() || currentScreen !== "tray-info") return;
+      win.setFullScreen(false);
+      if (win.isMaximized()) win.unmaximize();
+      win.setSize(620, 840);
+    });
+  }
   const showWhenReady = () => {
     if (win.isDestroyed() || currentScreen !== "tray-info") return;
     win.setFullScreen(false);
@@ -1670,8 +1702,9 @@ async function isLockRequired(): Promise<boolean> {
   // FR-15: 긴급해제 활성 중이면 잠금 스킵
   if (emergencyUnlockManager?.isActive) return false;
 
-  // 테스트 모드: 강제 화면 타입·오버라이드만으로 잠금 여부 판단
+  // 테스트 모드: [시작]으로 잠금 타입을 적용한 경우에만 잠금. ON만 하고 시작 안 누른 상태에서는 잠금 안 함
   if (testModeEnabled) {
+    if (!testModeLockIntent) return false;
     const work = getTestModeWorkData();
     const st = String(work.screenType ?? "").toLowerCase();
     return st === "before" || st === "off" || st === "empty";
@@ -2190,7 +2223,12 @@ app.whenReady().then(async () => {
       void getAllowTestMode().then((allowed) => {
         if (!allowed) return;
         testModeEnabled = !testModeEnabled;
-        if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+        if (testModeEnabled) {
+          testModeForceScreenType = "AUTO";
+          testModeLockIntent = false; // [시작] 누르기 전까지 주기 검사에서 잠금 안 함
+        } else {
+          lastWorkTimeFetchedAt = null;
+        }
         void saveTestModeState().then(() => {
           if (logger) void logger.write(testModeEnabled ? LOG_CODES.TEST_MODE_ENABLED : LOG_CODES.TEST_MODE_DISABLED, "INFO", { source: "hotkey" });
           broadcastTestModeChanged();
@@ -3238,7 +3276,10 @@ ipcMain.handle("pcoff:setTestModeEnabled", async (_event, enabled: boolean) => {
   if (!!enabled && !(await getAllowTestMode())) return { enabled: false };
   const prev = testModeEnabled;
   testModeEnabled = !!enabled;
-  if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+  if (testModeEnabled) {
+    testModeForceScreenType = "AUTO";
+    testModeLockIntent = false;
+  } else lastWorkTimeFetchedAt = null;
   await saveTestModeState();
   if (logger && prev !== testModeEnabled) {
     void logger.write(testModeEnabled ? LOG_CODES.TEST_MODE_ENABLED : LOG_CODES.TEST_MODE_DISABLED, "INFO", {});
@@ -3264,11 +3305,16 @@ ipcMain.handle("pcoff:setTestModeState", async (_event, patch: { enabled?: boole
         // allowTestMode: false 시 테스트 모드 켜기 무시
       } else {
         testModeEnabled = patch.enabled;
-        if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+        if (testModeEnabled) {
+          testModeForceScreenType = "AUTO";
+          testModeLockIntent = false;
+        } else lastWorkTimeFetchedAt = null;
       }
     }
     if (patch.forceScreenType === "AUTO" || patch.forceScreenType === "BEFORE" || patch.forceScreenType === "OFF" || patch.forceScreenType === "EMPTY") {
       testModeForceScreenType = patch.forceScreenType;
+      if (patch.forceScreenType === "BEFORE" || patch.forceScreenType === "OFF" || patch.forceScreenType === "EMPTY") testModeLockIntent = true; // [시작]으로 잠금 타입 적용됨 → 주기 검사에서 잠금 적용
+      else testModeLockIntent = false;
       if (logger) void logger.write(LOG_CODES.TEST_MODE_FORCE_SCREEN_CHANGED, "INFO", { forceScreenType: patch.forceScreenType });
     }
     if (patch.forceOperationMode === "AUTO" || patch.forceOperationMode === "NORMAL" || patch.forceOperationMode === "TEMP_EXTEND" || patch.forceOperationMode === "EMERGENCY_USE" || patch.forceOperationMode === "EMERGENCY_RELEASE") {

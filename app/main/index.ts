@@ -123,6 +123,8 @@ type TestForceOperationMode = "AUTO" | OperationMode;
 let testModeForceScreenType: TestForceScreenType = "AUTO";
 let testModeForceOperationMode: TestForceOperationMode = "AUTO";
 let testModeBypassApi = true;
+/** 테스트 모드에서 [시작]으로 잠금 타입(BEFORE/OFF/EMPTY)을 적용했을 때만 true. ON만 하고 시작 안 누른 상태에서는 주기 검사에서 잠금 안 함 */
+let testModeLockIntent = false;
 
 /** 테스트 오버라이드를 base에 병합. base는 변경하지 않고 새 객체 반환 */
 function mergeTestOverrides(base: Record<string, unknown>): Record<string, unknown> {
@@ -684,6 +686,7 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
     testModeForceScreenType = "AUTO";
     testModeForceOperationMode = "AUTO";
     testModeOverrides = {};
+    testModeLockIntent = false;
     lastWorkTimeFetchedAt = null;
     void saveTestModeState();
     broadcastTestModeChanged();
@@ -1670,8 +1673,9 @@ async function isLockRequired(): Promise<boolean> {
   // FR-15: 긴급해제 활성 중이면 잠금 스킵
   if (emergencyUnlockManager?.isActive) return false;
 
-  // 테스트 모드: 강제 화면 타입·오버라이드만으로 잠금 여부 판단
+  // 테스트 모드: [시작]으로 잠금 타입을 적용한 경우에만 잠금. ON만 하고 시작 안 누른 상태에서는 잠금 안 함
   if (testModeEnabled) {
+    if (!testModeLockIntent) return false;
     const work = getTestModeWorkData();
     const st = String(work.screenType ?? "").toLowerCase();
     return st === "before" || st === "off" || st === "empty";
@@ -2190,7 +2194,12 @@ app.whenReady().then(async () => {
       void getAllowTestMode().then((allowed) => {
         if (!allowed) return;
         testModeEnabled = !testModeEnabled;
-        if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+        if (testModeEnabled) {
+          testModeForceScreenType = "AUTO";
+          testModeLockIntent = false; // [시작] 누르기 전까지 주기 검사에서 잠금 안 함
+        } else {
+          lastWorkTimeFetchedAt = null;
+        }
         void saveTestModeState().then(() => {
           if (logger) void logger.write(testModeEnabled ? LOG_CODES.TEST_MODE_ENABLED : LOG_CODES.TEST_MODE_DISABLED, "INFO", { source: "hotkey" });
           broadcastTestModeChanged();
@@ -3238,7 +3247,10 @@ ipcMain.handle("pcoff:setTestModeEnabled", async (_event, enabled: boolean) => {
   if (!!enabled && !(await getAllowTestMode())) return { enabled: false };
   const prev = testModeEnabled;
   testModeEnabled = !!enabled;
-  if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+  if (testModeEnabled) {
+    testModeForceScreenType = "AUTO";
+    testModeLockIntent = false;
+  } else lastWorkTimeFetchedAt = null;
   await saveTestModeState();
   if (logger && prev !== testModeEnabled) {
     void logger.write(testModeEnabled ? LOG_CODES.TEST_MODE_ENABLED : LOG_CODES.TEST_MODE_DISABLED, "INFO", {});
@@ -3264,11 +3276,16 @@ ipcMain.handle("pcoff:setTestModeState", async (_event, patch: { enabled?: boole
         // allowTestMode: false 시 테스트 모드 켜기 무시
       } else {
         testModeEnabled = patch.enabled;
-        if (!testModeEnabled) lastWorkTimeFetchedAt = null;
+        if (testModeEnabled) {
+          testModeForceScreenType = "AUTO";
+          testModeLockIntent = false;
+        } else lastWorkTimeFetchedAt = null;
       }
     }
     if (patch.forceScreenType === "AUTO" || patch.forceScreenType === "BEFORE" || patch.forceScreenType === "OFF" || patch.forceScreenType === "EMPTY") {
       testModeForceScreenType = patch.forceScreenType;
+      if (patch.forceScreenType === "BEFORE" || patch.forceScreenType === "OFF" || patch.forceScreenType === "EMPTY") testModeLockIntent = true; // [시작]으로 잠금 타입 적용됨 → 주기 검사에서 잠금 적용
+      else testModeLockIntent = false;
       if (logger) void logger.write(LOG_CODES.TEST_MODE_FORCE_SCREEN_CHANGED, "INFO", { forceScreenType: patch.forceScreenType });
     }
     if (patch.forceOperationMode === "AUTO" || patch.forceOperationMode === "NORMAL" || patch.forceOperationMode === "TEMP_EXTEND" || patch.forceOperationMode === "EMERGENCY_USE" || patch.forceOperationMode === "EMERGENCY_RELEASE") {

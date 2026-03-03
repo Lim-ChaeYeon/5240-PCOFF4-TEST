@@ -88,6 +88,9 @@ const api = {
       data: Record<string, unknown>;
       error?: string;
     }>,
+  /** 긴급사용 OTP 발송 대상. lastWorkTimeData 또는 config에서 반환. getPcOffWorkTime에 필드 없을 때 config로 조직장 수신 적용 */
+  getEmergencyOtpSendTo: () =>
+    ipcRenderer.invoke("pcoff:getEmergencyOtpSendTo") as Promise<{ emergencyOtpSendTo: "SELF" | "MANAGER" }>,
   /** 보조 잠금창: 메인에서 동일 근태/배경 데이터 수신 후 적용 */
   onLockInitialWork: (callback: (data: Record<string, unknown>) => void) => {
     const handler = (_event: IpcRendererEvent, data: Record<string, unknown>) => callback(data);

@@ -28,6 +28,8 @@ const DEFAULT_WORK = {
   pcExMaxCount: 3,
   pcExTime: 30,
   pcoffEmergencyYesNo: "YES",
+  /** 긴급사용 OTP 발송 대상: SELF=본인, MANAGER=조직장. 서버 미제공 시 SELF */
+  emergencyOtpSendTo: "SELF",
   pcOnYn: "Y",
   pcOnMsg: "",
   screenType: "off",
@@ -68,6 +70,32 @@ function parseQueryWork() {
   };
 }
 
+/** 서버 응답에서 OTP 조직장 수신 여부 판별. (설정: OTP조직장수신여부 = OTP조직장 수신) */
+function resolveEmergencyOtpSendTo(data) {
+  if (!data || typeof data !== "object") return "SELF";
+  const v = (x) => (x === "Y" || x === "YES" || x === "y" || x === "yes" || x === true || x === 1);
+  const s = (x) => (typeof x === "string" && (x.includes("조직장") || x.includes("MANAGER")));
+  if (data.emergencyOtpSendTo === "MANAGER") return "MANAGER";
+  if (v(data.otpOrganizationalManagerReceiveYn)) return "MANAGER";
+  if (v(data.otpManagerReceiveYn)) return "MANAGER";
+  if (v(data.emergencyOtpManagerReceiveYn)) return "MANAGER";
+  if (v(data.otpOrganizationalManagerYn)) return "MANAGER";
+  if (s(data.otpReceiveTarget) || s(data.emergencyOtpReceiveTarget)) return "MANAGER";
+  if (s(data.otpOrganizationalManagerReceiveYn)) return "MANAGER"; // 값이 "OTP조직장 수신" 등 문자열인 경우
+  // 코드값: 2=조직장 등
+  if (data.otpReceiveTargetCode === 2 || data.emergencyOtpReceiveType === "2") return "MANAGER";
+  // 서버가 다른 키로 내려줄 수 있음 — 키명에 조직장/manager/organizational 포함이고 값이 수신/Y/true 면 MANAGER
+  for (const key of Object.keys(data)) {
+    const keyLower = key.toLowerCase();
+    const isManagerKey = key.includes("조직장") || (keyLower.includes("otp") && (keyLower.includes("manager") || keyLower.includes("organ")));
+    if (!isManagerKey) continue;
+    const val = data[key];
+    if (v(val)) return "MANAGER";
+    if (typeof val === "string" && (val.includes("조직장") || val.includes("수신"))) return "MANAGER";
+  }
+  return "SELF";
+}
+
 function coerceWorkTimeFromApi(data) {
   return {
     ...DEFAULT_WORK,
@@ -79,6 +107,7 @@ function coerceWorkTimeFromApi(data) {
     pcExMaxCount: Number(data.pcExMaxCount ?? DEFAULT_WORK.pcExMaxCount),
     pcExTime: Number(data.pcExTime ?? DEFAULT_WORK.pcExTime),
     pcoffEmergencyYesNo: data.pcoffEmergencyYesNo ?? data.emergencyUseYesNo ?? DEFAULT_WORK.pcoffEmergencyYesNo,
+    emergencyOtpSendTo: resolveEmergencyOtpSendTo(data),
     leaveSeatReasonYn: data.leaveSeatReasonYn ?? DEFAULT_WORK.leaveSeatReasonYn,
     leaveSeatReasonManYn: data.leaveSeatReasonManYn ?? DEFAULT_WORK.leaveSeatReasonManYn,
     leaveSeatOffInputMath: data.leaveSeatOffInputMath ?? null,
@@ -288,11 +317,52 @@ async function runAction(label, action) {
   }
 }
 
+/** OTP 발송 옵션에 따른 안내 문구. SELF=본인 발송, MANAGER=조직장 발송 */
+function getEmergencyOtpMessage(emergencyOtpSendTo) {
+  return emergencyOtpSendTo === "MANAGER"
+    ? "OTP가 조직장에게 발송되었습니다. 조직장으로부터 OTP를 전달받아 입력해주세요."
+    : "스마트폰 푸시알람/메일/앱으로 발송된 OTP를 입력해주세요.";
+}
+
+/**
+ * 긴급사용 안내 모달. OTP 발송 전 표시. 확인 시 true, 취소 시 false.
+ * @param {string} message - 옵션에 따른 안내 문구 (본인/조직장)
+ * @returns {Promise<boolean>}
+ */
+function showEmergencyIntroModal(message) {
+  const overlay = document.getElementById("emergency-intro-modal");
+  const descEl = document.getElementById("emergency-intro-desc");
+  const btnCancel = document.getElementById("emergency-intro-cancel");
+  const btnConfirm = document.getElementById("emergency-intro-confirm");
+  if (!overlay || !descEl) return Promise.resolve(false);
+  descEl.textContent = message || getEmergencyOtpMessage("SELF");
+  overlay.classList.remove("hidden");
+
+  return new Promise((resolve) => {
+    const close = (value) => {
+      overlay.classList.add("hidden");
+      btnCancel.removeEventListener("click", onCancel);
+      btnConfirm.removeEventListener("click", onConfirm);
+      overlay.removeEventListener("click", onOverlayClick);
+      resolve(value);
+    };
+    const onCancel = () => close(false);
+    const onConfirm = () => close(true);
+    const onOverlayClick = (e) => {
+      if (e.target === overlay) close(false);
+    };
+    btnCancel.addEventListener("click", onCancel);
+    btnConfirm.addEventListener("click", onConfirm);
+    overlay.addEventListener("click", onOverlayClick);
+  });
+}
+
 /**
  * 긴급사용 모달. serverPass가 있으면 이미 OTP 발송된 상태 → 인증번호 입력 + 사유 입력 후 확인 시 검증·사유 전송만.
  * @param {string|null} serverPass - Step1에서 받은 인증번호(있으면 모달만 검증·사유 전송, 없으면 사용 안 함)
+ * @param {string} [otpMessage] - 옵션에 따른 안내 문구(본인/조직장). 없으면 기본 문구 사용
  */
-function showEmergencyReasonModal(serverPass) {
+function showEmergencyReasonModal(serverPass, otpMessage) {
   const overlay = document.getElementById("emergency-modal");
   const passInput = document.getElementById("emergency-pass-input");
   const reasonInput = document.getElementById("emergency-reason-input");
@@ -304,7 +374,7 @@ function showEmergencyReasonModal(serverPass) {
 
   passInput.value = "";
   reasonInput.value = "긴급 업무 처리";
-  if (descEl) descEl.textContent = "휴대폰으로 수신된 인증번호를 입력한 뒤, 사유를 입력하고 확인을 눌러 주세요.";
+  if (descEl) descEl.textContent = otpMessage || getEmergencyOtpMessage("SELF");
   if (errorEl) {
     errorEl.textContent = "";
     errorEl.style.display = "none";
@@ -790,7 +860,7 @@ function setupEmergencyUnlockListeners() {
   }
 }
 
-/** 긴급사용 버튼 클릭 — 스크립트 로드 시 등록해 bootstrap 완료 전에도 모달/피드백 표시 */
+/** 긴급사용 버튼 클릭 — 먼저 OTP 옵션에 따른 안내 표시 → 확인 시에만 Step1(OTP 발송) 후 입력 화면으로 */
 function setupEmergencyUseListener() {
   btnUseEl?.addEventListener("click", async () => {
     if (!window.pcoffApi?.requestEmergencyUseStep1) {
@@ -799,9 +869,28 @@ function setupEmergencyUseListener() {
     }
     btnUseEl.disabled = true;
     try {
+      // OTP 발송 대상: Main에서 반환 (lastWorkTimeData 또는 config.emergencyOtpSendTo). getPcOffWorkTime에 필드 없어도 config로 조직장 수신 적용 가능
+      let sendTo = DEFAULT_WORK.emergencyOtpSendTo;
+      if (window.pcoffApi?.getEmergencyOtpSendTo) {
+        try {
+          const res = await window.pcoffApi.getEmergencyOtpSendTo();
+          if (res?.emergencyOtpSendTo === "MANAGER" || res?.emergencyOtpSendTo === "SELF") sendTo = res.emergencyOtpSendTo;
+        } catch (_) {}
+      }
+      if ((sendTo === DEFAULT_WORK.emergencyOtpSendTo) && (currentWork?.emergencyOtpSendTo === "MANAGER" || currentWork?.emergencyOtpSendTo === "SELF")) {
+        sendTo = currentWork.emergencyOtpSendTo;
+      }
+      const introMessage = getEmergencyOtpMessage(sendTo);
+
+      const confirmed = await showEmergencyIntroModal(introMessage);
+      if (!confirmed) {
+        btnUseEl.disabled = false;
+        return;
+      }
+
       const result = await window.pcoffApi.requestEmergencyUseStep1("긴급사용 요청");
       if (result?.success && result?.serverPass != null) {
-        await showEmergencyReasonModal(result.serverPass);
+        await showEmergencyReasonModal(result.serverPass, introMessage);
       } else {
         showToast(result?.error || "인증번호 발송에 실패했습니다.");
       }

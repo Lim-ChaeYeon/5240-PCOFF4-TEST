@@ -104,6 +104,18 @@
 
     <div id="toast" class="toast"></div>
 
+    <!-- 긴급사용 안내: OTP 발송 전 확인용. 확인 시 Step1(OTP 발송) 후 입력 모달로 이동 -->
+    <div id="emergency-intro-modal" class="modal-overlay hidden" aria-label="긴급사용 안내">
+      <div class="modal-box">
+        <h2 class="modal-title">긴급사용</h2>
+        <p class="modal-desc" id="emergency-intro-desc"></p>
+        <div class="modal-actions">
+          <button id="emergency-intro-cancel" class="button ghost">취소</button>
+          <button id="emergency-intro-confirm" class="button primary">확인</button>
+        </div>
+      </div>
+    </div>
+
     <div id="emergency-modal" class="modal-overlay hidden" aria-label="긴급사용 인증">
       <div class="modal-box">
         <h2 class="modal-title">긴급사용</h2>

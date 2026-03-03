@@ -136,6 +136,17 @@
         <h2 class="modal-title">이석 사유 입력</h2>
         <p class="modal-desc" id="leave-seat-desc">자리를 비운 사유를 입력한 뒤 PC-ON 하세요.</p>
         <p id="leave-seat-detected-at" class="modal-hint" style="display:none"></p>
+        <div id="leave-seat-work-type" class="leave-seat-type-group" style="display:none;">
+          <span class="leave-seat-type-group-title" style="grid-column: 1 / -1;">이석 구분</span>
+          <label class="leave-seat-type-option">
+            <input type="radio" name="leave-seat-work-type" value="0" />
+            <span class="leave-seat-type-label">근무 이석</span>
+          </label>
+          <label class="leave-seat-type-option">
+            <input type="radio" name="leave-seat-work-type" value="1" />
+            <span class="leave-seat-type-label">비근무 이석</span>
+          </label>
+        </div>
         <input id="leave-seat-reason-input" type="text" class="login-input modal-input" placeholder="예: 회의 참석" maxlength="200" />
         <div class="modal-actions">
           <button id="leave-seat-modal-cancel" class="button ghost">취소</button>
@@ -149,6 +160,17 @@
       <div class="modal-box">
         <h2 class="modal-title">이석 해제</h2>
         <p class="modal-desc">비밀번호를 입력한 뒤 PC-ON 하세요.</p>
+        <div id="leave-seat-unlock-work-type" class="leave-seat-type-group" style="display:none;">
+          <span class="leave-seat-type-group-title" style="grid-column: 1 / -1;">이석 구분</span>
+          <label class="leave-seat-type-option">
+            <input type="radio" name="leave-seat-unlock-work-type" value="0" />
+            <span class="leave-seat-type-label">근무 이석</span>
+          </label>
+          <label class="leave-seat-type-option">
+            <input type="radio" name="leave-seat-unlock-work-type" value="1" />
+            <span class="leave-seat-type-label">비근무 이석</span>
+          </label>
+        </div>
         <input id="leave-seat-unlock-password" type="password" class="login-input modal-input" placeholder="비밀번호" maxlength="100" autocomplete="off" />
         <input id="leave-seat-unlock-reason" type="text" class="login-input modal-input" placeholder="사유 (선택)" maxlength="200" style="margin-top:8px" />
         <div class="modal-actions">

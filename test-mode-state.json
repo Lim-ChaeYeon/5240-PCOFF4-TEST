@@ -1,0 +1,9 @@
+{
+  "testMode": {
+    "enabled": false,
+    "bypassApi": true,
+    "forceScreenType": "AUTO",
+    "forceOperationMode": "AUTO",
+    "overrides": {}
+  }
+}

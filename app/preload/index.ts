@@ -117,16 +117,16 @@ const api = {
   completeEmergencyUse: () => ipcRenderer.invoke("pcoff:completeEmergencyUse") as Promise<void>,
   completeEmergencyUseWithReason: (reason: string, emergencyUsePass: string) =>
     ipcRenderer.invoke("pcoff:completeEmergencyUseWithReason", { reason, emergencyUsePass }) as Promise<{ success: boolean; error?: string }>,
-  requestPcOnOffLog: (tmckButnCd: "IN" | "OUT", eventName: string, reason = "", isLeaveSeat = false) =>
-    ipcRenderer.invoke("pcoff:requestPcOnOffLog", { tmckButnCd, eventName, reason, isLeaveSeat }) as Promise<{
+  requestPcOnOffLog: (tmckButnCd: "IN" | "OUT", eventName: string, reason = "", isLeaveSeat = false, leaveSeatOffInputValue?: number) =>
+    ipcRenderer.invoke("pcoff:requestPcOnOffLog", { tmckButnCd, eventName, reason, isLeaveSeat, leaveSeatOffInputValue }) as Promise<{
       source: "api" | "mock" | "fallback";
       success: boolean;
       data?: unknown;
       error?: string;
     }>,
   /** FR-14: 이석 해제 비밀번호 검증 후 PC-ON (leaveSeatUnlockRequirePassword=true 시) */
-  requestPcOnWithLeaveSeatUnlock: (password: string, reason?: string) =>
-    ipcRenderer.invoke("pcoff:requestPcOnWithLeaveSeatUnlock", { password, reason }) as Promise<{
+  requestPcOnWithLeaveSeatUnlock: (password: string, reason?: string, leaveSeatOffInputValue?: number) =>
+    ipcRenderer.invoke("pcoff:requestPcOnWithLeaveSeatUnlock", { password, reason, leaveSeatOffInputValue }) as Promise<{
       source: "api" | "mock" | "fallback";
       success: boolean;
       data?: unknown;
@@ -265,7 +265,33 @@ const api = {
   },
   /** FR-17: 복구 전 사용 — 30분간 잠금화면 해제 후 재잠금 */
   requestOfflineGraceUse: () =>
-    ipcRenderer.invoke("pcoff:requestOfflineGraceUse") as Promise<{ success: boolean; durationMin: number }>
+    ipcRenderer.invoke("pcoff:requestOfflineGraceUse") as Promise<{ success: boolean; durationMin: number }>,
+
+  // 테스트 모드 (로컬 시업/종업/이석 재현)
+  getTestModeState: () =>
+    ipcRenderer.invoke("pcoff:getTestModeState") as Promise<{
+      allowed?: boolean;
+      enabled: boolean;
+      forceScreenType: string;
+      forceOperationMode: string;
+      bypassApi: boolean;
+      overrides: Record<string, unknown>;
+    }>,
+  setTestModeState: (patch: { enabled?: boolean; forceScreenType?: string; forceOperationMode?: string; bypassApi?: boolean; overrides?: Record<string, unknown> }) =>
+    ipcRenderer.invoke("pcoff:setTestModeState", patch) as Promise<{
+      enabled: boolean;
+      forceScreenType: string;
+      forceOperationMode: string;
+      bypassApi: boolean;
+      overrides: Record<string, unknown>;
+    }>,
+  onTestModeChanged: (callback: (data: { enabled: boolean; forceScreenType?: string; forceOperationMode?: string; bypassApi?: boolean; overrides?: Record<string, unknown> }) => void) => {
+    const handler = (_event: IpcRendererEvent, data: { enabled: boolean; forceScreenType?: string; forceOperationMode?: string; bypassApi?: boolean; overrides?: Record<string, unknown> }) => callback(data);
+    ipcRenderer.on("pcoff:test-mode-changed", handler);
+    return () => ipcRenderer.removeListener("pcoff:test-mode-changed", handler);
+  },
+  applyTestPreset: (name: string) =>
+    ipcRenderer.invoke("pcoff:applyTestPreset", name) as Promise<{ success: boolean; error?: string; forceScreenType?: string; forceOperationMode?: string; overrides?: Record<string, unknown> }>
 };
 
 contextBridge.exposeInMainWorld("pcoffApi", api);

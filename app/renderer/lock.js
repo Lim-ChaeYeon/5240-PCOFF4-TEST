@@ -111,6 +111,8 @@ function coerceWorkTimeFromApi(data) {
     leaveSeatReasonYn: data.leaveSeatReasonYn ?? DEFAULT_WORK.leaveSeatReasonYn,
     leaveSeatReasonManYn: data.leaveSeatReasonManYn ?? DEFAULT_WORK.leaveSeatReasonManYn,
     leaveSeatOffInputMath: data.leaveSeatOffInputMath ?? null,
+    leaveSeatDetectedAtStart: data.leaveSeatDetectedAtStart ?? null,
+    leaveSeatDetectedAtEnd: data.leaveSeatDetectedAtEnd ?? null,
     breakStartTime: data.breakStartTime ?? null,
     breakEndTime: data.breakEndTime ?? null,
     leaveSeatTime: Number(data.leaveSeatTime ?? DEFAULT_WORK.leaveSeatTime ?? 0) || 0,
@@ -151,11 +153,17 @@ function calcLeaveSeatPolicy(work) {
     work.leaveSeatReasonManYn === "YES" &&
     !isBreakTime;
 
-  const detectedAt = work.leaveSeatOffInputMath
-    ? formatDetectedAt(work.leaveSeatOffInputMath)
-    : null;
+  const detectedAt = work.leaveSeatDetectedAtStart
+    ? formatDetectedAt(work.leaveSeatDetectedAtStart)
+    : (work.leaveSeatOffInputMath && String(work.leaveSeatOffInputMath).length === 12
+      ? formatDetectedAt(work.leaveSeatOffInputMath)
+      : null);
+  const detectedAtRange = formatDetectedAtRange(work);
+  // leaveSeatOffInputMath: 0=미사용, 1=비근무입력, 2=자동근무이석, 3=근무/비근무 선택
+  const leaveSeatOffInputMath = work.leaveSeatOffInputMath;
+  const requireWorkNonWorkChoice = leaveSeatOffInputMath === 3 || leaveSeatOffInputMath === "3";
 
-  return { isLeaveSeat, requireReason, isBreakTime, detectedAt };
+  return { isLeaveSeat, requireReason, isBreakTime, detectedAt, detectedAtRange, leaveSeatOffInputMath, requireWorkNonWorkChoice };
 }
 
 function parseTimeToDate(value) {
@@ -189,24 +197,47 @@ function formatDetectedAt(value) {
   return `${String(value).slice(8, 10)}:${String(value).slice(10, 12)}`;
 }
 
+/** 이석 감지 구간 문구: "HH:mm ~ HH:mm 사이에 이석이 감지되었습니다" 또는 단일 시각 "HH:mm" */
+function formatDetectedAtRange(work) {
+  const start = work.leaveSeatDetectedAtStart;
+  const end = work.leaveSeatDetectedAtEnd;
+  if (start && end && String(start).length === 12 && String(end).length === 12) {
+    return `${formatDetectedAt(start)} ~ ${formatDetectedAt(end)} 사이에 이석이 감지되었습니다.`;
+  }
+  if (start && String(start).length === 12) return `이석 감지 시각: ${formatDetectedAt(start)}`;
+  if (work.leaveSeatOffInputMath && String(work.leaveSeatOffInputMath).length === 12) {
+    return `이석 감지 시각: ${formatDetectedAt(work.leaveSeatOffInputMath)}`;
+  }
+  return null;
+}
+
 /**
- * 이석 사유 입력 모달을 표시하고 사용자가 입력한 사유(string) 또는 취소(null)를 반환
+ * 이석 사유 입력 모달을 표시하고 사용자가 입력한 사유 또는 취소 시 null 반환.
+ * leaveSeatOffInputMath=3일 때 { reason, leaveSeatOffInputValue: 0|1 } 반환, 아니면 reason 문자열.
  */
 function showLeaveSeatReasonModal(work) {
   const overlay = document.getElementById("leave-seat-modal");
   const input = document.getElementById("leave-seat-reason-input");
   const detectedAtEl = document.getElementById("leave-seat-detected-at");
+  const workTypeEl = document.getElementById("leave-seat-work-type");
   const btnCancel = document.getElementById("leave-seat-modal-cancel");
   const btnConfirm = document.getElementById("leave-seat-modal-confirm");
   if (!overlay || !input) return Promise.resolve(null);
 
-  if (work.detectedAt) {
+  if (work.detectedAtRange || work.detectedAt) {
     if (detectedAtEl) {
-      detectedAtEl.textContent = `이석 감지 시각: ${work.detectedAt}`;
+      detectedAtEl.textContent = work.detectedAtRange || `이석 감지 시각: ${work.detectedAt}`;
       detectedAtEl.style.display = "";
     }
   }
+  if (workTypeEl) {
+    workTypeEl.style.display = work.requireWorkNonWorkChoice ? "" : "none";
+    const radios = workTypeEl.querySelectorAll('input[name="leave-seat-work-type"]');
+    radios.forEach((r) => { r.checked = false; });
+  }
 
+  input.placeholder = work.requireReason ? "예: 회의 참석 (필수)" : "예: 회의 참석";
+  input.required = !!work.requireReason;
   input.value = "";
   overlay.classList.remove("hidden");
   input.focus();
@@ -223,11 +254,21 @@ function showLeaveSeatReasonModal(work) {
     const onCancel = () => close(null);
     const onConfirm = () => {
       const reason = (input.value ?? "").trim();
-      if (!reason) {
-        showToast("이석 사유를 입력해 주세요.");
+      if (work.requireReason && !reason) {
+        showToast("이석 사유를 입력해 주세요. (필수)");
+        input.focus();
         return;
       }
-      close(reason);
+      if (work.requireWorkNonWorkChoice) {
+        const checked = workTypeEl?.querySelector('input[name="leave-seat-work-type"]:checked');
+        if (!checked) {
+          showToast("이석 구분(근무 이석/비근무 이석)을 선택해 주세요.");
+          return;
+        }
+        close({ reason, leaveSeatOffInputValue: Number(checked.value) });
+      } else {
+        close(reason);
+      }
     };
     const onOverlayClick = (e) => { if (e.target === overlay) close(null); };
     const onKeydown = (e) => {
@@ -243,18 +284,29 @@ function showLeaveSeatReasonModal(work) {
 
 /**
  * FR-14: 이석 해제 비밀번호 모달 (leaveSeatUnlockRequirePassword=true 시)
- * @returns Promise<{ password: string; reason: string } | null> 확인 시 값, 취소 시 null
+ * @param {object} [policy] - calcLeaveSeatPolicy 결과. requireWorkNonWorkChoice 시 근무/비근무 선택 표시
+ * @returns Promise<{ password: string; reason: string; leaveSeatOffInputValue?: number } | null> 확인 시 값, 취소 시 null
  */
-function showLeaveSeatUnlockPasswordModal() {
+function showLeaveSeatUnlockPasswordModal(policy) {
   const overlay = document.getElementById("leave-seat-unlock-modal");
   const passwordInput = document.getElementById("leave-seat-unlock-password");
   const reasonInput = document.getElementById("leave-seat-unlock-reason");
+  const workTypeEl = document.getElementById("leave-seat-unlock-work-type");
   const btnCancel = document.getElementById("leave-seat-unlock-modal-cancel");
   const btnConfirm = document.getElementById("leave-seat-unlock-modal-confirm");
   if (!overlay || !passwordInput) return Promise.resolve(null);
 
+  if (workTypeEl) {
+    workTypeEl.style.display = (policy && policy.requireWorkNonWorkChoice) ? "" : "none";
+    const radios = workTypeEl.querySelectorAll('input[name="leave-seat-unlock-work-type"]');
+    radios.forEach((r) => { r.checked = false; });
+  }
+  if (reasonInput) {
+    reasonInput.placeholder = (policy && policy.requireReason) ? "예: 회의 참석 (필수)" : "사유 (선택)";
+    reasonInput.required = !!(policy && policy.requireReason);
+    reasonInput.value = "";
+  }
   passwordInput.value = "";
-  if (reasonInput) reasonInput.value = "";
   overlay.classList.remove("hidden");
   passwordInput.focus();
 
@@ -275,7 +327,22 @@ function showLeaveSeatUnlockPasswordModal() {
         showToast("비밀번호를 입력해 주세요.");
         return;
       }
-      close({ password, reason: (reasonInput?.value ?? "").trim() });
+      const reason = (reasonInput?.value ?? "").trim();
+      if (policy && policy.requireReason && !reason) {
+        showToast("이석 사유를 입력해 주세요. (필수)");
+        if (reasonInput) reasonInput.focus();
+        return;
+      }
+      const result = { password, reason };
+      if (policy && policy.requireWorkNonWorkChoice && workTypeEl) {
+        const checked = workTypeEl.querySelector('input[name="leave-seat-unlock-work-type"]:checked');
+        if (!checked) {
+          showToast("이석 구분(근무 이석/비근무 이석)을 선택해 주세요.");
+          return;
+        }
+        result.leaveSeatOffInputValue = Number(checked.value);
+      }
+      close(result);
     };
     const onOverlayClick = (e) => { if (e.target === overlay) close(null); };
     const onKeydown = (e) => {
@@ -299,21 +366,39 @@ function showToast(text, durationMs) {
   setTimeout(() => toastEl.classList.remove("show"), ms);
 }
 
+/** PC-ON 후 stillLocked일 때 잠금화면을 시업/종업 화면으로 갱신 */
+async function refreshLockScreenFromWorkTime() {
+  if (!window.pcoffApi?.getWorkTime) return;
+  try {
+    const res = await window.pcoffApi.getWorkTime();
+    if (res?.data) {
+      currentWork = coerceWorkTimeFromApi(res.data);
+      currentLeaveSeatPolicy = calcLeaveSeatPolicy(currentWork);
+      applyLockScreenContent(currentWork);
+      applyButtonDisp(currentWork);
+      applyLockScreenImages(currentWork);
+    }
+  } catch (_) {}
+}
+
 async function runAction(label, action) {
   try {
     const result = await action();
     if (result?.stillLocked) {
       showToast("현재 PC-ON이 불가능합니다. 시업 시간에만 가능합니다.");
-      return;
+      await refreshLockScreenFromWorkTime();
+      return result;
     }
     if (result?.success === false) {
       showToast(result?.error || `${label} 실패`);
-      return;
+      return result;
     }
     showToast(`${label} 완료`);
+    return result;
   } catch (error) {
     showToast(`${label} 오류`);
     console.error(error);
+    return undefined;
   }
 }
 
@@ -628,7 +713,9 @@ function applyLockInfo(work) {
 
   if (work.screenType === "empty") {
     const title = work.lockScreenLeaveTitle || fallback.leave.title;
-    const message = work.lockScreenLeaveMessage || work.pcOnMsg || fallback.leave.message;
+    let message = work.lockScreenLeaveMessage || work.pcOnMsg || fallback.leave.message;
+    const detectedAtRange = formatDetectedAtRange(work);
+    if (detectedAtRange) message = message ? `${message}\n${detectedAtRange}` : detectedAtRange;
     const source = work.lockScreenLeaveTitle || work.lockScreenLeaveMessage || work.pcOnMsg ? "server" : "fallback";
     console.info("[PCOFF] 잠금화면 적용 — empty(이석): title:", title, "| message:", message, "| source:", source);
     if (lockTitleEl) lockTitleEl.textContent = title;
@@ -649,7 +736,7 @@ function applyLockInfo(work) {
 
 // 현재 근태/이석 정책 (bootstrap·onLockInitialWork에서 갱신, PC-ON 등 클릭 시 사용)
 let currentWork = null;
-let currentLeaveSeatPolicy = { isLeaveSeat: false, requireReason: false, isBreakTime: false, detectedAt: null };
+let currentLeaveSeatPolicy = { isLeaveSeat: false, requireReason: false, isBreakTime: false, detectedAt: null, detectedAtRange: null };
 
 // 보조 잠금창: 메인에서 동일 근태/배경 데이터 수신 후 적용 (주모니터와 동일 문구·배경). 수신 시 currentWork/currentLeaveSeatPolicy 갱신해 PC-ON 분기(이석 비밀번호 등) 반영.
 if (typeof window !== "undefined" && window.pcoffApi?.onLockInitialWork) {
@@ -1115,23 +1202,19 @@ async function bootstrap() {
     // FR-14: 이석 시 설정(leaveSeatUnlockRequirePassword)이 true이거나 미설정이면 비밀번호 모달 후 검증 PC-ON (false로 둔 경우만 스킵)
     const needLeaveSeatPassword = policy.isLeaveSeat && (w.leaveSeatUnlockRequirePassword === true || (w.leaveSeatUnlockRequirePassword !== false && window.pcoffApi?.requestPcOnWithLeaveSeatUnlock));
     if (needLeaveSeatPassword && window.pcoffApi?.requestPcOnWithLeaveSeatUnlock) {
-      const result = await showLeaveSeatUnlockPasswordModal();
+      const result = await showLeaveSeatUnlockPasswordModal(policy);
       if (!result) return;
       try {
-        const res = await window.pcoffApi.requestPcOnWithLeaveSeatUnlock(result.password, result.reason || undefined);
+        const res = await window.pcoffApi.requestPcOnWithLeaveSeatUnlock(result.password, result.reason || undefined, result.leaveSeatOffInputValue);
         if (res?.success === false) {
           showToast(res?.error || "비밀번호가 맞지 않습니다.");
           return;
         }
         if (res?.stillLocked) {
           showToast("이석 해제되었습니다. 근무 시간이 아니면 PC-ON이 반영되지 않을 수 있습니다.", 5500);
+          await refreshLockScreenFromWorkTime();
         } else {
           showToast("PC-ON (이석 해제) 완료", 3500);
-        }
-        if (window.pcoffApi?.getWorkTime) {
-          try {
-            await window.pcoffApi.getWorkTime();
-          } catch (_) {}
         }
       } catch (e) {
         showToast("PC-ON (이석 해제) 오류");
@@ -1142,11 +1225,13 @@ async function bootstrap() {
 
     // 이석 상태이고 사유 입력이 필요한 경우 → 모달 표시
     if (policy.requireReason) {
-      const reason = await showLeaveSeatReasonModal(policy);
-      if (reason == null || reason === "") return; // 취소
-      // 사유 포함하여 PC-ON 요청 (eventName=Lock Off - 이석해제, isLeaveSeat=true)
+      const reasonResult = await showLeaveSeatReasonModal(policy);
+      if (reasonResult == null) return; // 취소
+      const reason = typeof reasonResult === "string" ? reasonResult : reasonResult.reason;
+      const leaveSeatOffInputValue = typeof reasonResult === "object" ? reasonResult.leaveSeatOffInputValue : undefined;
+      if (typeof reason !== "string" || reason === "") return;
       await runAction("PC-ON (이석해제)", () =>
-        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off - 이석해제", reason, true)
+        window.pcoffApi.requestPcOnOffLog("IN", "Lock Off - 이석해제", reason, true, leaveSeatOffInputValue)
       );
       return;
     }

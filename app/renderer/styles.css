@@ -129,6 +129,64 @@ body {
 .modal-input { width: 100%; margin-bottom: 14px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
+/* 이석 구분 선택: 카드형 라디오 (근무/비근무) */
+.leave-seat-type-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.leave-seat-type-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 16px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  min-height: 48px;
+}
+.leave-seat-type-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(63, 141, 255, 0.4);
+}
+.leave-seat-type-option input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.leave-seat-type-option input:checked + .leave-seat-type-label,
+.leave-seat-type-option input:focus-visible + .leave-seat-type-label {
+  outline: none;
+}
+.leave-seat-type-option:has(input:checked) {
+  border-color: #3f8dff;
+  background: rgba(63, 141, 255, 0.12);
+  box-shadow: 0 0 0 1px rgba(63, 141, 255, 0.25);
+}
+.leave-seat-type-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  pointer-events: none;
+  text-align: center;
+}
+.leave-seat-type-option:has(input:checked) .leave-seat-type-label {
+  color: #7eb8ff;
+}
+.leave-seat-type-group-title {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
 .version-badge {
   font-size: 11px; color: var(--muted); background: rgba(255,255,255,0.06);
   padding: 4px 8px; border-radius: 6px; margin-right: 4px;

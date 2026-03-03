@@ -182,6 +182,19 @@ Electron 앱에서 사용하는 로그 코드 매핑.
 
 ---
 
+## 테스트 모드
+
+| Log Code | Description | 비고 |
+|----------|-------------|------|
+| TEST_MODE_ENABLED | 테스트 모드 활성화 | UI/핫키 |
+| TEST_MODE_DISABLED | 테스트 모드 비활성화 | |
+| TEST_MODE_OVERRIDE_UPDATED | 테스트 오버라이드 값 변경 | keys 등 |
+| TEST_MODE_PRESET_APPLIED | 테스트 프리셋 적용 | 2단계 |
+| TEST_MODE_FORCE_SCREEN_CHANGED | 강제 화면 타입 변경 | forceScreenType |
+| TEST_MODE_FORCE_OPERATION_CHANGED | 강제 동작 모드 변경 | forceOperationMode |
+
+---
+
 ## 업데이트 무결성
 
 | Log Code | Description | 비고 |

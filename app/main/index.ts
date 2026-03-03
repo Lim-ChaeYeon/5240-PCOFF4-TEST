@@ -529,7 +529,8 @@ function attachWindowHotkeys(win: BrowserWindow): void {
  * 현재 창을 작동정보(main.html)로 전환. 잠금 검사 없음.
  * macOS: 풀스크린 잠금창 재사용 시 setFullScreen(false)/setSize가 적용되지 않아
  * 기존 창을 닫고 새 창(620×840)을 열어 에이전트 기본 크기로 표시.
- * Windows: 같은 창에서 hide → 로드 → show(620×840).
+ * Windows: 같은 창에서 hide → 로드 → show(620×840). 잠금 해제 후 항상 디폴트 크기로 보이도록
+ * showWhenReady/로드 완료 콜백에서 setFullScreen(false)를 한 번 더 호출함 (Windows에서 풀스크린 유지 이슈 방지).
  * @param onDisplay - 지정 시 해당 디스플레이에 창 배치 (보조 모니터에서 긴급해제 시 반응 보장)
  */
 function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
@@ -560,6 +561,7 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
   const win = mainWindow;
   const showWhenReady = () => {
     if (win.isDestroyed() || currentScreen !== "tray-info") return;
+    win.setFullScreen(false);
     if (win.isMaximized()) win.unmaximize();
     win.setSize(620, 840);
     if (onDisplay?.workArea) {
@@ -587,6 +589,7 @@ function showTrayInfoInCurrentWindow(onDisplay?: Electron.Display): void {
     if (!win || win.isDestroyed()) return;
     void loadMainHtmlWithRetry(win).then(() => {
       if (win.isDestroyed() || currentScreen !== "tray-info") return;
+      win.setFullScreen(false);
       if (win.isMaximized()) win.unmaximize();
       win.setSize(620, 840);
       win.center();
@@ -624,6 +627,7 @@ async function createTrayInfoWindow(): Promise<void> {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     currentScreen = "tray-info";
+    mainWindow.setFullScreen(false);
     if (mainWindow.isMaximized()) mainWindow.unmaximize();
     mainWindow.setSize(620, 840);
     mainWindow.setTitle("PCOFF 작동정보");
@@ -658,6 +662,7 @@ async function createTrayInfoWindow(): Promise<void> {
   attachMainWindowCloseHandler(win);
   attachWindowHotkeys(win);
   win.once("ready-to-show", () => {
+    win.setFullScreen(false);
     if (win.isMaximized()) win.unmaximize();
     win.setSize(620, 840);
     win.show();
@@ -670,6 +675,7 @@ async function createTrayInfoWindow(): Promise<void> {
   });
   loadMainHtmlWithRetry(win).catch((err) => {
     console.error("[PCOFF] Failed to load main.html:", err);
+    win.setFullScreen(false);
     if (win.isMaximized()) win.unmaximize();
     win.setSize(620, 840);
     win.show();
@@ -1224,6 +1230,7 @@ function createLoginWindow(): void {
     mainWindow.focus();
     setImmediate(() => {
       if (mainWindow && !mainWindow.isDestroyed() && currentScreen === "login") {
+        mainWindow.setFullScreen(false);
         if (mainWindow.isMaximized()) mainWindow.unmaximize();
         mainWindow.setSize(520, 620);
         mainWindow.focus();

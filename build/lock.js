@@ -44,13 +44,26 @@ const DEFAULT_WORK = {
 };
 
 function parseYmdHm(value) {
-  if (!value || value.length !== 12) return null;
-  const y = Number(value.slice(0, 4));
-  const m = Number(value.slice(4, 6)) - 1;
-  const d = Number(value.slice(6, 8));
-  const hh = Number(value.slice(8, 10));
-  const mm = Number(value.slice(10, 12));
+  if (!value || String(value).length < 12) return null;
+  const s = String(value);
+  const y = Number(s.slice(0, 4));
+  const m = Number(s.slice(4, 6)) - 1;
+  const d = Number(s.slice(6, 8));
+  const hh = Number(s.slice(8, 10));
+  const mm = Number(s.slice(10, 12));
   return new Date(y, m, d, hh, mm, 0);
+}
+
+/** 임시연장 허용 마감 시각 (종업+연장최대시간). 이 시각 이후에는 임시연장 버튼 비노출/요청 거부. */
+function getTempExtendDeadline(work) {
+  const pcOff = parseYmdHm(String(work.pcOffYmdTime ?? ""));
+  if (!pcOff) return null;
+  const count = Number(work.pcExCount ?? 0);
+  const maxCount = Number(work.pcExMaxCount ?? 0);
+  const timeMin = Number(work.pcExTime ?? 0) || 60;
+  if (maxCount <= 0) return null;
+  const baseMs = pcOff.getTime() - count * timeMin * 60 * 1000;
+  return new Date(baseMs + maxCount * timeMin * 60 * 1000);
 }
 
 function hm(value) {
@@ -598,14 +611,18 @@ function applyButtonDisp(work) {
       // 시업전 잠금화면: 임시연장 버튼 숨김 (시업 전에는 연장 불가)
       setVisible(btnExtendEl, false);
       break;
-    case "off":
+    case "off": {
       // 종업 화면: 시업·종업 시각이 있고 현재가 종업 시각 이후이면 표시. 또는 임시연장 가능 횟수가 있으면 표시(시간 파싱 실패/데이터 부재 시에도 버튼 노출)
       // 단, pcExCount >= pcExMaxCount이면 임시연장 횟수 소진 → 버튼 숨김 (API: pcExCount < pcExMaxCount일 때만 호출)
+      // 연장 허용 마감 시각(종업+최대연장시간) 초과 시에도 버튼 숨김 (예: 19시 종업·30분×2회 → 20시 이후 불가)
       const timeOk = Boolean(startTime && offTime && startTime <= now && offTime <= now);
       const maxCount = Number(work.pcExMaxCount ?? 0);
       const hasQuota = maxCount > 0 && Number(work.pcExCount ?? 0) < maxCount;
-      setVisible(btnExtendEl, (timeOk || maxCount > 0) && hasQuota);
+      const deadline = getTempExtendDeadline(work);
+      const withinDeadline = !deadline || now <= deadline;
+      setVisible(btnExtendEl, (timeOk || maxCount > 0) && hasQuota && withinDeadline);
       break;
+    }
     case "empty":
       setVisible(btnExtendEl, false);
       setVisible(btnUseEl, false);

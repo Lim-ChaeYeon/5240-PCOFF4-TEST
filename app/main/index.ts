@@ -310,6 +310,23 @@ function parseYmdHm(value: string | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * 임시연장 허용 마감 시각 계산.
+ * 예: 종업 19시, 30분×2회 연장 → 마감 20시. 20시 이후에는 임시연장 불가.
+ * basePcOff = pcOffYmdTime - (이미 사용한 연장 횟수 × 단위분), deadline = basePcOff + (최대 연장 횟수 × 단위분).
+ */
+function getTempExtendDeadline(work: { pcOffYmdTime?: string; pcExCount?: number; pcExMaxCount?: number; pcExTime?: number }): Date | null {
+  const pcOff = parseYmdHm(String(work.pcOffYmdTime ?? ""));
+  if (!pcOff) return null;
+  const count = Number(work.pcExCount ?? 0);
+  const maxCount = Number(work.pcExMaxCount ?? 0);
+  const timeMin = Number(work.pcExTime ?? 0) || 60;
+  if (maxCount <= 0) return null;
+  const baseMs = pcOff.getTime() - count * timeMin * 60 * 1000;
+  const deadlineMs = baseMs + maxCount * timeMin * 60 * 1000;
+  return new Date(deadlineMs);
+}
+
 /** 터미널에 설정/로드된 값 출력 (디버깅·확인용) */
 function logLoadedConfig(label: string, payload: Record<string, unknown>): void {
   console.log("[PCOFF] 설정값:", label, JSON.stringify(payload, null, 2));
@@ -2780,6 +2797,12 @@ ipcMain.handle("pcoff:requestPcExtend", async (_event, payload: { pcOffYmdTime?:
   const currentCount = Number(lastWorkTimeData?.pcExCount ?? 0);
   if (maxCount > 0 && currentCount >= maxCount) {
     return { source: "api", success: false, error: "임시연장 가능 횟수를 모두 사용했습니다." };
+  }
+  // 연장 허용 마감 시각 초과 시 거부 (예: 19시 종업·30분×2회 → 20시 이후 임시연장 불가)
+  const work = lastWorkTimeData as { pcOffYmdTime?: string; pcExCount?: number; pcExMaxCount?: number; pcExTime?: number } | undefined;
+  const deadline = work ? getTempExtendDeadline(work) : null;
+  if (deadline && new Date() > deadline) {
+    return { source: "api", success: false, error: "임시연장 허용 횟수 또는 시간이 초과되었습니다." };
   }
   try {
     const pcOffYmdTime = payload.pcOffYmdTime ?? buildMockWorkTime().pcOffYmdTime ?? "";

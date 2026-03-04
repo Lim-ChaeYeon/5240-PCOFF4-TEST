@@ -250,6 +250,26 @@ function formatYmdHm(date: Date): string {
   return `${y}${m}${d}${h}${min}`;
 }
 
+/** YYYYMMDDHH24MI(12자) / HHMMSS(6자) / HHMM(4자) → HH:mm 표시용 */
+function formatYmdHmToDisplay(ymdHm: string | undefined): string | null {
+  if (ymdHm == null) return null;
+  const s = String(ymdHm).trim().replace(/\D/g, "");
+  if (s.length >= 12) return `${s.slice(8, 10)}:${s.slice(10, 12)}`;
+  if (s.length >= 6) return `${s.slice(0, 2)}:${s.slice(2, 4)}`;
+  if (s.length >= 4) return `${s.slice(0, 2)}:${s.slice(2, 4)}`;
+  return null;
+}
+
+/** 4자(HHMM)·6자(HHMMSS) 시간 문자열을 오늘 날짜 붙여 12자(YYYYMMDDHHmm)로 정규화 */
+function normalizeToYmdHm12(value: string): string {
+  const digits = String(value).trim().replace(/\D/g, "");
+  if (digits.length >= 12) return digits.slice(0, 12);
+  const ymd = getTodayYmd();
+  if (digits.length >= 6) return ymd + digits.slice(0, 4);
+  if (digits.length >= 4) return ymd + digits.slice(0, 4);
+  return "";
+}
+
 /** Date → HHmm (4자, callCmmPcOnOffLogPrc emergencyYn 이석 시작/종료 시각용) */
 function formatHm(date: Date): string {
   const h = String(date.getHours()).padStart(2, "0");
@@ -1642,6 +1662,14 @@ async function refreshWorkTimeFromApi(): Promise<void> {
     const data = await api.getPcOffWorkTime();
     const dataRecord = data as unknown as Record<string, unknown>;
     preserveLocalPcExCountIfHigher(dataRecord);
+    // 긴급사용 중이면 서버에 없어도 기존 시작/종료 시각 유지(표시용)
+    if (currentMode === "EMERGENCY_USE" && Object.keys(lastWorkTimeData).length > 0) {
+      const prev = lastWorkTimeData as Record<string, unknown>;
+      if ((!dataRecord.emergencyStaDate || String(dataRecord.emergencyStaDate).trim() === "") && prev.emergencyStaDate)
+        dataRecord.emergencyStaDate = prev.emergencyStaDate;
+      if ((!dataRecord.emergencyEndDate || String(dataRecord.emergencyEndDate).trim() === "") && prev.emergencyEndDate)
+        dataRecord.emergencyEndDate = prev.emergencyEndDate;
+    }
     lastWorkTimeData = dataRecord;
     applyResolvedScreenType(lastWorkTimeData);
     lastWorkTimeFetchedAt = new Date().toISOString();
@@ -2900,6 +2928,29 @@ ipcMain.handle("pcoff:requestEmergencyUse", async (_event, payload: { reason?: s
     await logger.write(LOG_CODES.UNLOCK_TRIGGERED, "INFO", { action: "emergency_use" });
     setOperationMode("EMERGENCY_USE");
     await refreshWorkTimeFromApi();
+    // 긴급사용 시간대: 응답에서 다양한 키로 읽고, 4/6자리면 12자로 정규화 후 저장
+    const merged = lastWorkTimeData as Record<string, unknown>;
+    const itemRec = item as Record<string, unknown>;
+    const staFromItem =
+      itemRec.emergencyStaDate ?? itemRec.EmergencyStaDate ?? itemRec.emergency_sta_date ?? itemRec.emergencyStaTime ?? itemRec.EmergencyStaTime;
+    const endFromItem =
+      itemRec.emergencyEndDate ?? itemRec.EmergencyEndDate ?? itemRec.emergency_end_date ?? itemRec.emergencyEndTime ?? itemRec.EmergencyEndTime;
+    if (staFromItem != null && String(staFromItem).trim() !== "") {
+      const raw = String(staFromItem).trim();
+      merged.emergencyStaDate = raw.length === 12 ? raw : normalizeToYmdHm12(raw) || raw;
+    }
+    if (endFromItem != null && String(endFromItem).trim() !== "") {
+      const raw = String(endFromItem).trim();
+      merged.emergencyEndDate = raw.length === 12 ? raw : normalizeToYmdHm12(raw) || raw;
+    }
+    if (!merged.emergencyStaDate || !merged.emergencyEndDate) {
+      const now = new Date();
+      const durationMinutes = Number(merged.emergencyUnlockTime ?? 0);
+      const endDefault = new Date(now.getTime() + durationMinutes * 60 * 1000);
+      if (!merged.emergencyStaDate) merged.emergencyStaDate = formatYmdHm(now);
+      if (!merged.emergencyEndDate) merged.emergencyEndDate = formatYmdHm(endDefault);
+    }
+    lastWorkTimeData = merged;
     showTrayInfoInCurrentWindow();
     return { source: "api", success: true, data: raw };
   } catch (error) {
@@ -3117,10 +3168,56 @@ ipcMain.handle("pcoff:verifyIntegrity", async () => {
   return { valid, status: guard.getStatus() };
 });
 
+/** 시각 문자열이 아닌 값(N, Y 등)이면 무시 */
+function isValidEmergencyTimeValue(s: string): boolean {
+  const t = String(s).trim();
+  if (!t || t.length < 4) return false;
+  if (/^[NY]$/i.test(t)) return false;
+  const digits = t.replace(/\D/g, "");
+  return digits.length >= 4;
+}
+
+/** rec에서 긴급사용 시작/종료 시각 읽기 (다양한 키·형식 허용, N/Y 등 무시) */
+function pickEmergencyDate(rec: Record<string, unknown>, kind: "Sta" | "End"): string | null {
+  const keys =
+    kind === "Sta"
+      ? ["emergencyStaDate", "EmergencyStaDate", "emergency_sta_date", "emergencyStaTime", "EmergencyStaTime"]
+      : ["emergencyEndDate", "EmergencyEndDate", "emergency_end_date", "emergencyEndTime", "EmergencyEndTime"];
+  for (const k of keys) {
+    const v = rec[k];
+    if (v != null) {
+      const trimmed = String(v).trim();
+      if (trimmed !== "" && isValidEmergencyTimeValue(trimmed)) return trimmed;
+    }
+  }
+  return null;
+}
+
 // 트레이 작동정보 조회 IPC
 ipcMain.handle("pcoff:getTrayOperationInfo", async () => {
   const userInfo = await getLoginUserDisplay(baseDir);
-  
+  const rec = lastWorkTimeData as Record<string, unknown>;
+  let emergencyStaDate = pickEmergencyDate(rec, "Sta");
+  let emergencyEndDate = pickEmergencyDate(rec, "End");
+  if (emergencyStaDate && emergencyStaDate.length > 0 && emergencyStaDate.length !== 12) {
+    const normalized = normalizeToYmdHm12(emergencyStaDate);
+    if (normalized) emergencyStaDate = normalized;
+  }
+  if (emergencyEndDate && emergencyEndDate.length > 0 && emergencyEndDate.length !== 12) {
+    const normalized = normalizeToYmdHm12(emergencyEndDate);
+    if (normalized) emergencyEndDate = normalized;
+  }
+  // 긴급사용 중인데 시간이 없으면 표시용으로 즉시 계산해 채움 (항상 12자 형식)
+  if (currentMode === "EMERGENCY_USE" && (!emergencyStaDate || !emergencyEndDate)) {
+    const now = new Date();
+    const durationMinutes = Number(rec.emergencyUnlockTime ?? 0);
+    const endDefault = new Date(now.getTime() + durationMinutes * 60 * 1000);
+    if (!emergencyStaDate) emergencyStaDate = formatYmdHm(now);
+    if (!emergencyEndDate) emergencyEndDate = formatYmdHm(endDefault);
+    rec.emergencyStaDate = emergencyStaDate;
+    rec.emergencyEndDate = emergencyEndDate;
+    lastWorkTimeData = rec;
+  }
   return {
     reflectedAttendance: {
       basedAt: lastWorkTimeFetchedAt,
@@ -3138,7 +3235,27 @@ ipcMain.handle("pcoff:getTrayOperationInfo", async () => {
       pcExCount: lastWorkTimeData.pcExCount,
       pcExMaxCount: lastWorkTimeData.pcExMaxCount,
       pcExTime: lastWorkTimeData.pcExTime,
-      pcoffEmergencyYesNo: lastWorkTimeData.pcoffEmergencyYesNo
+      pcoffEmergencyYesNo: lastWorkTimeData.pcoffEmergencyYesNo,
+      emergencyStaDate: (emergencyStaDate && isValidEmergencyTimeValue(emergencyStaDate) ? String(emergencyStaDate).trim() : undefined) || undefined,
+      emergencyEndDate: (emergencyEndDate && isValidEmergencyTimeValue(emergencyEndDate) ? String(emergencyEndDate).trim() : undefined) || undefined,
+      emergencyTimeRangeDisplay: (() => {
+        const sta = emergencyStaDate ? String(emergencyStaDate).trim() : "";
+        const end = emergencyEndDate ? String(emergencyEndDate).trim() : "";
+        if (!sta || !end) return undefined;
+        const staD = formatYmdHmToDisplay(sta);
+        const endD = formatYmdHmToDisplay(end);
+        return staD && endD ? `${staD} ~ ${endD}` : undefined;
+      })(),
+      emergencyUseDurationMinutes: (() => {
+        const v = rec.emergencyUnlockTime ?? rec.EmergencyUnlockTime ?? (rec as Record<string, unknown>).emergency_unlock_time ?? rec.emergencyUseTime ?? (rec as Record<string, unknown>).emergency_use_time;
+        const min = Number(v ?? 0);
+        const emergencyKeys = Object.keys(rec).filter((k) => /emergency|unlock|Unlock/i.test(k));
+        const emergencyPayload: Record<string, unknown> = {};
+        for (const k of emergencyKeys) emergencyPayload[k] = rec[k];
+        console.log("[PCOFF] getTrayOperationInfo 긴급사용 시간 옵션:", { raw: v, durationMinutes: min, recEmergencyFields: emergencyPayload });
+        return min;
+      })(),
+      emergencyUseActive: currentMode === "EMERGENCY_USE"
     },
     versionInfo: {
       appVersion: updater.getAppVersion(),

@@ -19,6 +19,7 @@ const extendCountEl = document.getElementById("extend-count");
 const extendMaxEl = document.getElementById("extend-max");
 const extendTimeEl = document.getElementById("extend-time");
 const emergencyStatusEl = document.getElementById("emergency-status");
+const emergencyTimeRangeEl = document.getElementById("emergency-time-range");
 const versionAppEl = document.getElementById("version-app");
 const versionUpdatedEl = document.getElementById("version-updated");
 const versionSummaryEl = document.getElementById("version-summary");
@@ -139,6 +140,26 @@ function parseYmdTime(ymdTime) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** 긴급사용 시작/종료(YYYYMMDDHH24MI 또는 HH24MISS) → Date. 비교·표시용 */
+function parseEmergencyTime(s) {
+  if (s == null || s === "") return null;
+  const t = String(s).trim();
+  if (!t) return null;
+  if (t.length >= 12) {
+    return parseYmdTime(t.slice(0, 12));
+  }
+  if (t.length >= 4) {
+    const now = new Date();
+    const h = parseInt(t.slice(0, 2), 10);
+    const m = parseInt(t.slice(2, 4), 10);
+    const sec = t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0;
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, sec, 0);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
 /** 적용 정책 표시용 라벨: 근무 시간대면 "근무 중", 아니면 screenType 한글 매핑 */
 function getAppliedPolicyLabel(data) {
   const st = (data.screenType ?? "").toString().toLowerCase();
@@ -230,9 +251,42 @@ function updateAttendanceInfo(data, hasError = false, errorMessage = "조회 실
     extendTimeEl.textContent = String(data.pcExTime ?? 30);
   }
   if (emergencyStatusEl) {
-    const allowed = data.pcoffEmergencyYesNo === "YES";
-    emergencyStatusEl.textContent = allowed ? "허용" : "미허용";
-    emergencyStatusEl.style.color = allowed ? "var(--accent)" : "var(--muted)";
+    const allowed = (data.pcoffEmergencyYesNo || "").toString().toUpperCase() === "YES" || (data.pcoffEmergencyYesNo || "").toString().toUpperCase() === "Y";
+    const emergencyUseActive = data.emergencyUseActive === true;
+    const start = parseEmergencyTime(data.emergencyStaDate);
+    const end = parseEmergencyTime(data.emergencyEndDate);
+    const now = new Date();
+    const inUseByTime = allowed && start && end && now >= start && now <= end;
+    const inUse = emergencyUseActive || inUseByTime;
+    console.log("[PCOFF] 긴급사용 수신값:", {
+      emergencyStaDate: data.emergencyStaDate,
+      emergencyEndDate: data.emergencyEndDate,
+      emergencyTimeRangeDisplay: data.emergencyTimeRangeDisplay,
+      emergencyUseDurationMinutes: data.emergencyUseDurationMinutes,
+      emergencyUseActive: data.emergencyUseActive
+    });
+    const fmt = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    // 시간대: Main 포맷 우선 → 파싱 결과 → 사용 중이면 로컬 계산(옵션 분)
+    if (emergencyTimeRangeEl) {
+      let text = "";
+      if (data.emergencyTimeRangeDisplay && typeof data.emergencyTimeRangeDisplay === "string") {
+        text = data.emergencyTimeRangeDisplay;
+      } else if (start && end) {
+        text = `${fmt(start)} ~ ${fmt(end)}`;
+      } else if (inUse) {
+        const durationMinutes = Number(data.emergencyUseDurationMinutes ?? 0);
+        const startTime = new Date();
+        const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
+        text = `${fmt(startTime)} ~ ${fmt(endTime)}`;
+      } else if (allowed) {
+        text = "-";
+      }
+      emergencyTimeRangeEl.textContent = text;
+      emergencyTimeRangeEl.classList.toggle("hidden", !text);
+    }
+    // 상태: 허용 / 사용 중 (동시 표시) 또는 허용 / 미허용
+    emergencyStatusEl.textContent = inUse ? "허용 / 사용 중" : (allowed ? "허용" : "미허용");
+    emergencyStatusEl.style.color = inUse || allowed ? "var(--accent)" : "var(--muted)";
   }
 }
 
@@ -324,8 +378,15 @@ async function refreshAttendance(options = {}) {
         updateAttendanceInfo(data, true, NETWORK_OFFLINE_MESSAGE);
         if (!silent) showToast(NETWORK_OFFLINE_MESSAGE);
       } else {
-        updateReflectedInfo(result);
-        updateAttendanceInfo(result);
+        // 새로고침 후 모드(긴급사용 등) 포함한 작동정보로 UI 갱신
+        const info = await window.pcoffApi.getTrayOperationInfo?.();
+        if (info?.myAttendance) {
+          updateReflectedInfo(info.myAttendance);
+          updateAttendanceInfo(info.myAttendance);
+        } else {
+          updateReflectedInfo(result);
+          updateAttendanceInfo(result);
+        }
         if (!silent) showToast("근태정보 갱신됨");
       }
     } else if (window.pcoffApi?.getWorkTime) {

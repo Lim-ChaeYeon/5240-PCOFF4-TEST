@@ -306,6 +306,8 @@ function buildMockWorkTime(): WorkTimeResponse {
   const ymd = getTodayYmd();
   return {
     pcOnYn: "Y",
+    staYmdTime: `${ymd}0830`,
+    endYmdTime: `${ymd}1830`,
     pcOnYmdTime: `${ymd}0830`,
     pcOffYmdTime: `${ymd}1830`,
     pcExCount: 1,
@@ -3127,6 +3129,8 @@ ipcMain.handle("pcoff:getTrayOperationInfo", async () => {
     myAttendance: {
       workStartTime: lastWorkTimeData.pcOnYmdTime,
       workEndTime: lastWorkTimeData.pcOffYmdTime,
+      staYmdTime: lastWorkTimeData.staYmdTime,
+      endYmdTime: lastWorkTimeData.endYmdTime,
       pcOnYmdTime: lastWorkTimeData.pcOnYmdTime,
       pcOffYmdTime: lastWorkTimeData.pcOffYmdTime,
       pcOnYn: lastWorkTimeData.pcOnYn,

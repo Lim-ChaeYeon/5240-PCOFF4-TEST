@@ -66,6 +66,9 @@ let isolationModeActive = false;
 let lastLockBlurRefocusAt = 0;
 const LOCK_BLUR_REFOCUS_DEBOUNCE_MS = 500;
 
+/** 잠금화면에서 입력용 모달(이석 해제 비밀번호 등)이 열려 있으면 true. Windows에서 blur 시 재포커스가 입력란 포커스를 빼앗아 깜빡임을 유발하므로, 모달 열림 중에는 blur 재포커스를 스킵 */
+let lockModalOpen = false;
+
 /** FR-17: 복구 전 사용 — 30분간 잠금 해제 후 재잠금. 만료 시각(ms) 또는 null */
 let offlineGraceUseUntil: number | null = null;
 let offlineGraceUseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -507,9 +510,10 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
       win.setFullScreen(true);
     }
   });
-  // 잠금화면 중 Cmd+Tab(앱 전환) 등으로 포커스가 빠지면 다시 맨 앞으로 가져옴
+  // 잠금화면 중 Cmd+Tab(앱 전환) 등으로 포커스가 빠지면 다시 맨 앞으로 가져옴. 모달(비밀번호/사유 입력) 열림 중에는 스킵 → Windows에서 입력란 포커스 깜빡임 방지
   win.on("blur", () => {
     if (currentScreen !== "lock" || win.isDestroyed()) return;
+    if (lockModalOpen) return;
     if (process.platform === "darwin" && lockWindowsByDisplayId.size > 0) {
       const now = Date.now();
       if (now - lastLockBlurRefocusAt < LOCK_BLUR_REFOCUS_DEBOUNCE_MS) return;
@@ -602,6 +606,7 @@ function attachLockWindowBehavior(win: BrowserWindow): void {
   if (process.platform !== "darwin") {
     win.on("blur", () => {
       if (currentScreen !== "lock" || win.isDestroyed()) return;
+      if (lockModalOpen) return;
       setTimeout(() => {
         if (currentScreen !== "lock" || !win || win.isDestroyed()) return;
         app.focus({ steal: true });
@@ -3101,17 +3106,38 @@ ipcMain.handle(
         return { source: "api", success: false, error: verify.message ?? "비밀번호가 맞지 않습니다." };
       }
     } else {
-      try {
-        const verify = await api.verifyLeaveSeatUnlock(payload.password ?? "", payload.reason ?? "");
-        if (!verify.success) {
-          return { source: "api", success: false, error: verify.message ?? "비밀번호가 올바르지 않습니다." };
+      const maxAttempts = 3;
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const verify = await api.verifyLeaveSeatUnlock(payload.password ?? "", payload.reason ?? "");
+          if (!verify.success) {
+            return { source: "api", success: false, error: verify.message ?? "비밀번호가 올바르지 않습니다." };
+          }
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          const errMsg = String(err);
+          if (errMsg.includes("404") || errMsg.includes("verifyLeaveSeatUnlock")) {
+            return {
+              source: "api",
+              success: false,
+              error:
+                "서버에 이석 해제 검증 API가 없습니다. config.json에 leaveSeatUnlockPassword(로컬 검증) 또는 leaveSeatUnlockVerifyUrl(별도 URL 검증)을 설정하면 해제할 수 있습니다."
+            };
+          }
+          if (attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, 1000));
+          }
         }
-      } catch (err) {
-        const errMsg = String(err);
-        if (errMsg.includes("404") || errMsg.includes("verifyLeaveSeatUnlock")) {
-          return { source: "api", success: false, error: "이석 해제 검증 API를 사용할 수 없습니다." };
-        }
-        throw err;
+      }
+      if (lastErr) {
+        return {
+          source: "api",
+          success: false,
+          error: "연결에 실패했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요."
+        };
       }
     }
     try {
@@ -3508,6 +3534,11 @@ ipcMain.handle("pcoff:applyTestPreset", async (_event, name: string) => {
   if (logger) void logger.write(LOG_CODES.TEST_MODE_PRESET_APPLIED, "INFO", { preset: name });
   broadcastTestModeChanged();
   return { success: true, forceScreenType: testModeForceScreenType, forceOperationMode: testModeForceOperationMode, overrides: { ...testModeOverrides } };
+});
+
+// 잠금화면에서 입력 모달(이석 해제 비밀번호 등) 열림 여부. blur 시 재포커스 스킵으로 Windows 포커스 깜빡임 방지
+ipcMain.on("pcoff:lockModalOpen", (_event, open: boolean) => {
+  lockModalOpen = open;
 });
 
 // 로그인 성공 후: pcOnYmdTime/pcOffYmdTime 기준 잠금 필요 시 잠금화면 표시 (호출한 창을 재사용해 새 창 안 띄움)

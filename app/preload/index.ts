@@ -98,6 +98,8 @@ const api = {
     ipcRenderer.on("pcoff:lock-initial-work", handler);
     return () => ipcRenderer.removeListener("pcoff:lock-initial-work", handler);
   },
+  /** 잠금화면에서 입력 모달(이석 해제 비밀번호 등) 열림 여부. Windows blur 시 재포커스 스킵으로 입력란 깜빡임 방지 */
+  setLockModalOpen: (open: boolean) => ipcRenderer.send("pcoff:lockModalOpen", open),
   requestPcExtend: (pcOffYmdTime?: string) =>
     ipcRenderer.invoke("pcoff:requestPcExtend", { pcOffYmdTime }) as Promise<{
       source: "api" | "mock" | "fallback";

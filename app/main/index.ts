@@ -2017,6 +2017,8 @@ app.whenReady().then(async () => {
   }
 
   app.setName(APP_NAME);
+  // Windows 등에서 기본 메뉴(File/Edit/View/Window/Help) 비표시
+  Menu.setApplicationMenu(null);
   // 설치 앱: userData 사용(개발 시 state와 분리). 개발: process.cwd()
   baseDir = app.isPackaged ? app.getPath("userData") : process.cwd();
   // 로그·설정 폴더가 없으면 생성 (폴더 경로 확인 시 해당 경로가 존재하도록)

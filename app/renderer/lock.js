@@ -583,7 +583,7 @@ function setVisible(el, visible) {
 
 /**
  * 잠금화면 버튼 노출 조건
- * - 임시연장: screenType "off"(종업)일 때만. 시업·종업 시각 이후이거나 pcExMaxCount > 0이면 표시.
+ * - 임시연장: screenType "off"(종업)일 때만. 시업전(before)에서는 숨김. 시업·종업 시각 이후이거나 pcExMaxCount > 0이면 표시.
  * - 긴급사용: screenType이 before/empty가 아니고, pcoffEmergencyYesNo === "YES"일 때.
  * - 긴급해제: 항상 DOM에 표시. eligible 여부는 getEmergencyUnlockEligibility(서버 emergencyUnlockUseYn=YES, emergencyUnlockPasswordSetYn=Y)로 활성/비활성만 구분.
  */
@@ -591,9 +591,11 @@ function applyButtonDisp(work) {
   const now = new Date();
   const startTime = parseYmdHm(work.pcOnYmdTime);
   const offTime = parseYmdHm(work.pcOffYmdTime);
+  const st = (work.screenType ?? "").toLowerCase();
 
-  switch (work.screenType) {
+  switch (st) {
     case "before":
+      // 시업전 잠금화면: 임시연장 버튼 숨김 (시업 전에는 연장 불가)
       setVisible(btnExtendEl, false);
       break;
     case "off":

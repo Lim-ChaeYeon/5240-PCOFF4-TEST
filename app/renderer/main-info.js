@@ -124,6 +124,44 @@ function formatTime(ymdTime) {
   return `${ymdTime.slice(8, 10)}:${ymdTime.slice(10, 12)}`;
 }
 
+/** YYYYMMDDHH24MI → Date. 비교용. 실패 시 null */
+function parseYmdTime(ymdTime) {
+  if (!ymdTime || String(ymdTime).length !== 12) return null;
+  const s = String(ymdTime);
+  const y = parseInt(s.slice(0, 4), 10);
+  const m = parseInt(s.slice(4, 6), 10) - 1;
+  const d = parseInt(s.slice(6, 8), 10);
+  const h = parseInt(s.slice(8, 10), 10);
+  const min = parseInt(s.slice(10, 12), 10);
+  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d) || Number.isNaN(h) || Number.isNaN(min))
+    return null;
+  const date = new Date(y, m, d, h, min, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** 적용 정책 표시용 라벨: 근무 시간대면 "근무 중", 아니면 screenType 한글 매핑 */
+function getAppliedPolicyLabel(data) {
+  const st = (data.screenType ?? "").toString().toLowerCase();
+  const start = parseYmdTime(data.pcOnYmdTime);
+  const end = parseYmdTime(data.pcOffYmdTime);
+  const now = new Date();
+  if (start && end && st !== "empty" && now >= start && now < end)
+    return "근무 중";
+  if (st === "before") return "시업 전";
+  if (st === "off") return "종업";
+  if (st === "empty") return "이석";
+  return "일반";
+}
+
+/** screenType raw 값 → 표시용 한글 (캐시만 있을 때 사용) */
+function screenTypeToLabel(st) {
+  const s = (st ?? "").toString().toLowerCase();
+  if (s === "before") return "시업 전";
+  if (s === "off") return "종업";
+  if (s === "empty") return "이석";
+  return st || "일반";
+}
+
 function formatDateTime(isoString) {
   if (!isoString) return "-";
   try {
@@ -155,17 +193,23 @@ function updateReflectedInfo(data) {
     reflectedTimeEl.textContent = `기준: ${new Date().toLocaleTimeString("ko-KR")}`;
   }
   if (appliedPolicyEl) {
-    appliedPolicyEl.textContent = data.screenType || "일반";
+    appliedPolicyEl.textContent = getAppliedPolicyLabel(data);
   }
   if (pcOnStatusEl) {
     pcOnStatusEl.textContent = data.pcOnYn === "Y" ? "사용 중" : "잠금";
     pcOnStatusEl.style.color = data.pcOnYn === "Y" ? "var(--accent)" : "var(--danger)";
   }
+  // 레이블 순서에 맞춤: "시업 시간 / PC ON 가능 시간" → pcOnYmdTime / staYmdTime
+  // 레이블 순서에 맞춤: "종업 시간 / PC OFF 예정 시각" → pcOffYmdTime / endYmdTime
   if (workStartEl) {
-    workStartEl.textContent = formatTime(data.pcOnYmdTime);
+    const sta = formatTime(data.staYmdTime);
+    const pcOn = formatTime(data.pcOnYmdTime);
+    workStartEl.textContent = sta !== "--:--" || pcOn !== "--:--" ? `${pcOn} / ${sta}` : "-";
   }
   if (workEndEl) {
-    workEndEl.textContent = formatTime(data.pcOffYmdTime);
+    const end = formatTime(data.endYmdTime);
+    const pcOff = formatTime(data.pcOffYmdTime);
+    workEndEl.textContent = end !== "--:--" || pcOff !== "--:--" ? `${pcOff} / ${end}` : "-";
   }
 }
 
@@ -239,7 +283,7 @@ async function loadTrayOperationInfo() {
         reflectedTimeEl.textContent = `기준: ${formatDateTime(info.reflectedAttendance.basedAt)}`;
       }
       if (appliedPolicyEl && info.reflectedAttendance.appliedPolicy) {
-        appliedPolicyEl.textContent = info.reflectedAttendance.appliedPolicy;
+        appliedPolicyEl.textContent = screenTypeToLabel(info.reflectedAttendance.appliedPolicy);
       }
     }
     if (info.myAttendance) {

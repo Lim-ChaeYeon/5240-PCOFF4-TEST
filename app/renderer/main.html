@@ -275,11 +275,11 @@
               <span id="pc-on-status" class="status-value">-</span>
             </div>
             <div class="status-row">
-              <span class="status-label">시업 시간 / PC ON 가능 시간</span>
+              <span class="status-label">시업 시각 / PC ON 가능 시각</span>
               <span id="work-start" class="status-value">-</span>
             </div>
             <div class="status-row">
-              <span class="status-label">종업 시간 / PC OFF 예정 시각</span>
+              <span class="status-label">종업 시각 / PC OFF 예정 시각</span>
               <span id="work-end" class="status-value">-</span>
             </div>
           </div>
@@ -367,7 +367,10 @@
       </div>
       <div class="drawer-section">
         <h2>시간·근태 값 입력</h2>
-        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">입력 후 [값 적용]으로 동작 여부 테스트. <strong>강제 화면</strong>을 시업 전/종업/이석로 두면 시간과 무관하게 그 화면으로 동작하고, <strong>AUTO</strong>일 때만 현재 시각·exCountRenewal 기준으로 시업 전/종업이 구분됩니다.</p>
+        <p style="font-size: 11px; color: var(--muted); margin-bottom: 8px;">입력 후 [값 적용]으로 동작 여부 테스트. <strong>강제 화면</strong>을 시업 전/종업/이석로 두면 시간과 무관하게 그 화면으로 동작하고, <strong>AUTO</strong>일 때만 현재 시각·기준 시각(exCountRenewal)으로 시업 전/종업이 구분됩니다.</p>
+        <label for="test-exCountRenewal">기준 시각 (exCountRenewal, 12자리)</label>
+        <input type="text" id="test-exCountRenewal" placeholder="202602270830" maxlength="12" inputmode="numeric" pattern="[0-9]*" title="강제 화면 AUTO일 때: 현재 시각 &lt; 기준 시각 → 종업(off), 현재 시각 ≥ 기준 시각 → 시업 전(before)" />
+        <p style="font-size: 10px; color: var(--muted); margin: 0 0 8px;">AUTO일 때만 사용. 이 시각 이전=종업, 이후=시업 전. 비우면 서버/모킹 값 사용.</p>
         <label for="test-pcOnYmdTime">시업 시간 (YYYYMMDDHHmm 12자리)</label>
         <input type="text" id="test-pcOnYmdTime" placeholder="202602270830" maxlength="12" inputmode="numeric" pattern="[0-9]*" />
         <label for="test-pcOffYmdTime">종업 시간 (YYYYMMDDHHmm 12자리)</label>

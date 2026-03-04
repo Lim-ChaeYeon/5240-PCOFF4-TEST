@@ -1,6 +1,6 @@
 {
   "testMode": {
-    "enabled": true,
+    "enabled": false,
     "bypassApi": true,
     "forceScreenType": "AUTO",
     "forceOperationMode": "AUTO",

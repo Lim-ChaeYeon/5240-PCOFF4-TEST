@@ -220,17 +220,17 @@ function updateReflectedInfo(data) {
     pcOnStatusEl.textContent = data.pcOnYn === "Y" ? "사용 중" : "잠금";
     pcOnStatusEl.style.color = data.pcOnYn === "Y" ? "var(--accent)" : "var(--danger)";
   }
-  // 레이블 순서에 맞춤: "시업 시간 / PC ON 가능 시간" → pcOnYmdTime / staYmdTime
-  // 레이블 순서에 맞춤: "종업 시간 / PC OFF 예정 시각" → pcOffYmdTime / endYmdTime
+  // 레이블 순서에 맞춤: "시업 시간 / PC ON 가능 시간" → staYmdTime / pcOnYmdTime
+  // 레이블 순서에 맞춤: "종업 시간 / PC OFF 예정 시각" → endYmdTime / pcOffYmdTime
   if (workStartEl) {
     const sta = formatTime(data.staYmdTime);
     const pcOn = formatTime(data.pcOnYmdTime);
-    workStartEl.textContent = sta !== "--:--" || pcOn !== "--:--" ? `${pcOn} / ${sta}` : "-";
+    workStartEl.textContent = sta !== "--:--" || pcOn !== "--:--" ? `${sta} / ${pcOn}` : "-";
   }
   if (workEndEl) {
     const end = formatTime(data.endYmdTime);
     const pcOff = formatTime(data.pcOffYmdTime);
-    workEndEl.textContent = end !== "--:--" || pcOff !== "--:--" ? `${pcOff} / ${end}` : "-";
+    workEndEl.textContent = end !== "--:--" || pcOff !== "--:--" ? `${end} / ${pcOff}` : "-";
   }
 }
 
@@ -464,7 +464,7 @@ function syncTestModeDrawerInputsFromState(overrides, opts) {
     if (patchOnly && !(key in overrides)) return;
     set("test-" + key, overrides[key] ?? "");
   };
-  const allKeys = ["pcOnYmdTime", "pcOffYmdTime", "pcExCount", "pcExMaxCount", "pcExTime", "leaveSeatUseYn", "leaveSeatTime", "leaveSeatReasonYn", "leaveSeatReasonManYn", "pcoffEmergencyYesNo",
+  const allKeys = ["exCountRenewal", "pcOnYmdTime", "pcOffYmdTime", "pcExCount", "pcExMaxCount", "pcExTime", "leaveSeatUseYn", "leaveSeatTime", "leaveSeatReasonYn", "leaveSeatReasonManYn", "pcoffEmergencyYesNo",
     "lockScreenBeforeTitle", "lockScreenBeforeMessage", "lockScreenBeforeBackground", "lockScreenBeforeLogo", "lockScreenOffTitle", "lockScreenOffMessage", "lockScreenOffBackground", "lockScreenOffLogo", "lockScreenLeaveTitle", "lockScreenLeaveMessage", "lockScreenLeaveBackground", "lockScreenLeaveLogo"];
   allKeys.forEach((k) => setIf(k, overrides[k]));
 }
@@ -472,6 +472,8 @@ function syncTestModeDrawerInputsFromState(overrides, opts) {
 /** Drawer 입력값에서 overrides 객체 수집 (시간·근태·잠금화면 문구·리소스) */
 function collectOverridesFromDrawer() {
   const overrides = {};
+  const rawExRenewal = document.getElementById("test-exCountRenewal")?.value?.trim();
+  if (rawExRenewal && /^\d{12}$/.test(rawExRenewal)) overrides.exCountRenewal = rawExRenewal;
   const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
   const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
   if (rawPcOn && /^\d{12}$/.test(rawPcOn)) overrides.pcOnYmdTime = rawPcOn;
@@ -541,6 +543,11 @@ async function setupTestModeDrawer() {
 
   if (testApplyOverridesEl && window.pcoffApi?.setTestModeState) {
     testApplyOverridesEl.addEventListener("click", async () => {
+      const rawEx = document.getElementById("test-exCountRenewal")?.value?.trim();
+      if (rawEx && !/^\d{12}$/.test(rawEx)) {
+        showToast("기준 시각은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+        return;
+      }
       const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
       const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
       if (rawPcOn && !/^\d{12}$/.test(rawPcOn)) {
@@ -604,6 +611,11 @@ async function setupTestModeDrawer() {
 
   if (testStartBtnEl && window.pcoffApi?.setTestModeState) {
     testStartBtnEl.addEventListener("click", async () => {
+      const rawEx = document.getElementById("test-exCountRenewal")?.value?.trim();
+      if (rawEx && !/^\d{12}$/.test(rawEx)) {
+        showToast("기준 시각은 12자리 숫자(YYYYMMDDHHmm)로 입력하세요.");
+        return;
+      }
       const rawPcOn = document.getElementById("test-pcOnYmdTime")?.value?.trim();
       const rawPcOff = document.getElementById("test-pcOffYmdTime")?.value?.trim();
       if (rawPcOn && !/^\d{12}$/.test(rawPcOn)) {

@@ -3,6 +3,7 @@
   "lockScreenApiUrl": "https://5240.work/LockScreen/getScreenInfo.php",
   "sendLockPassUrl": "https://5240.work/Includes/sendLockPass.php",
   "allowTestMode": true,
+  "pcOffButtonShutdown": false,
   "lockScreen": {
     "before": { "title": "", "message": "", "backgroundUrl": "", "logoUrl": "" },
     "off": { "title": "", "message": "", "backgroundUrl": "", "logoUrl": "" },

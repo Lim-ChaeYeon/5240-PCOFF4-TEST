@@ -42,6 +42,7 @@ import {
 } from "../core/installer-registry.js";
 import { LeaveSeatReporter } from "../core/leave-seat-reporter.js";
 import { readJson, writeJson } from "../core/storage.js";
+import { exec, spawn } from "node:child_process";
 
 /** 개발 시: 프로젝트 디렉터리, 설치 앱: userData(설치 앱 전용 상태·로그 분리) */
 let baseDir = process.cwd();
@@ -58,6 +59,8 @@ let currentScreen: ScreenType = "login";
 
 /** 강제 종료(Ctrl+Shift+Q) 시 true. close 이벤트에서 preventDefault 하지 않고 창 닫기 허용 */
 let isForceQuit = false;
+/** 시스템 종료 시퀀스 진행 중 플래그: 잠금창 close 차단/종료 차단 훅을 우회해 OS 종료를 막지 않도록 함 */
+let isSystemShutdownInProgress = false;
 
 /** FR-19: 격리 모드(복구 실패 시) — 잠금 유지, 운영팀 조치 대기 */
 let isolationModeActive = false;
@@ -486,7 +489,7 @@ function loadMainHtmlWithRetry(win: BrowserWindow, maxAttempts = 3): Promise<voi
  */
 function attachMainWindowCloseHandler(win: BrowserWindow): void {
   win.on("close", (e) => {
-    if (isForceQuit) {
+    if (isForceQuit || isSystemShutdownInProgress) {
       // 강제 종료: 창 닫기 허용하여 app.quit() 완료
       return;
     }
@@ -506,12 +509,13 @@ function attachMainWindowCloseHandler(win: BrowserWindow): void {
   });
   // 잠금화면 중에는 ESC 등으로 전체 화면 해제 불가 — 즉시 다시 전체 화면
   win.on("leave-full-screen", () => {
-    if (currentScreen === "lock" && !win.isDestroyed()) {
+    if (!isSystemShutdownInProgress && currentScreen === "lock" && !win.isDestroyed()) {
       win.setFullScreen(true);
     }
   });
   // 잠금화면 중 Cmd+Tab(앱 전환) 등으로 포커스가 빠지면 다시 맨 앞으로 가져옴. 모달(비밀번호/사유 입력) 열림 중에는 스킵 → Windows에서 입력란 포커스 깜빡임 방지
   win.on("blur", () => {
+    if (isSystemShutdownInProgress) return;
     if (currentScreen !== "lock" || win.isDestroyed()) return;
     if (lockModalOpen) return;
     if (process.platform === "darwin" && lockWindowsByDisplayId.size > 0) {
@@ -596,15 +600,16 @@ function removeLockWindowCloseHandler(win: BrowserWindow): void {
 /** 잠금화면 동작 부착 (닫기 차단, leave-full-screen 시 재진입, blur 시 재포커스) — 보조 잠금창용 */
 function attachLockWindowBehavior(win: BrowserWindow): void {
   const closeHandler = (e: Electron.Event) => {
-    if (!isForceQuit && currentScreen === "lock" && !closingAllLockWindows) e.preventDefault();
+    if (!isForceQuit && !isSystemShutdownInProgress && currentScreen === "lock" && !closingAllLockWindows) e.preventDefault();
   };
   (win as unknown as { _lockCloseHandler?: (e: Electron.Event) => void })._lockCloseHandler = closeHandler;
   win.on("close", closeHandler);
   win.on("leave-full-screen", () => {
-    if (currentScreen === "lock" && !win.isDestroyed()) win.setFullScreen(true);
+    if (!isSystemShutdownInProgress && currentScreen === "lock" && !win.isDestroyed()) win.setFullScreen(true);
   });
   if (process.platform !== "darwin") {
     win.on("blur", () => {
+      if (isSystemShutdownInProgress) return;
       if (currentScreen !== "lock" || win.isDestroyed()) return;
       if (lockModalOpen) return;
       setTimeout(() => {
@@ -1729,16 +1734,11 @@ function broadcastWorkTimeToLockWindows(): void {
 }
 
 /**
- * 서버가 pcExCount를 0으로 주어도, 이미 사용한 연장 횟수는 로컬 lastWorkTimeData를 유지해 덮어쓰지 않음.
- * API 응답 객체를 인자로 받아 필요 시 해당 객체를 mutate함. (createLockWindow, showLockInWindow, isLockRequired, getWorkTime 등에서 사용)
+ * 근태 데이터는 변경 시 API 값을 사용. 로컬로 덮어쓰지 않음(시스템 옵션·서버 반영이 에이전트에 그대로 적용되도록).
+ * 임시연장(TEMP_EXTEND) 중 연장 만료 시각 전까지만 별도 병합 로직에서 로컬 pcOffYmdTime/pcExCount 유지.
  */
-function preserveLocalPcExCountIfHigher(apiData: Record<string, unknown>): void {
-  const apiExCount = Number(apiData.pcExCount ?? 0);
-  const localExCount = Number(lastWorkTimeData?.pcExCount ?? 0);
-  if (localExCount >= 1 && apiExCount < localExCount) {
-    apiData.pcExCount = lastWorkTimeData!.pcExCount;
-    apiData.pcOffYmdTime = lastWorkTimeData!.pcOffYmdTime;
-  }
+function preserveLocalPcExCountIfHigher(_apiData: Record<string, unknown>): void {
+  // no-op: 근태 데이터 전부 API 응답 값 사용
 }
 
 /**
@@ -2429,7 +2429,7 @@ app.on("activate", () => {
 app.on("before-quit", async (e) => {
   // 다운로드 중/대기 중에는 의도치 않은 종료 방지 (사용자가 '지금 재시작'을 누를 때만 적용)
   const updateStatus = updater.getStatus();
-  if (updateStatus.state === "downloading" || updateStatus.state === "available") {
+  if (!isSystemShutdownInProgress && (updateStatus.state === "downloading" || updateStatus.state === "available")) {
     e.preventDefault();
     return;
   }
@@ -2989,6 +2989,147 @@ ipcMain.handle("pcoff:requestEmergencyUse", async (_event, payload: { reason?: s
   }
 });
 
+/** config.pcOffButtonShutdown === true 시 잠금화면 PC-OFF 버튼 성공 후 시스템 종료. OS별 shutdown 명령 실행 (지연 후 실행해 토스트 표시 시간 확보) */
+async function triggerSystemShutdownIfConfigured(): Promise<void> {
+  const configPath = join(baseDir, PATHS.config);
+  const config = await readJson<{ pcOffButtonShutdown?: boolean }>(configPath, {});
+  if (config.pcOffButtonShutdown !== true) {
+    console.info("[PCOFF] PC-OFF 후 시스템 종료 스킵 — config.json에 pcOffButtonShutdown: true 없음. 경로:", configPath);
+    return;
+  }
+  isSystemShutdownInProgress = true;
+  isForceQuit = true;
+  const delayMs = 1000;
+  const cmd =
+    process.platform === "win32"
+      ? "shutdown /s /t 0"
+      : process.platform === "darwin"
+        ? "osascript -e 'tell application \"System Events\" to shut down'"
+        : "shutdown -h now";
+  const macFallbackCmd =
+    "osascript " +
+    "-e 'tell application \"System Events\" to set uiApps to name of every process whose background only is false' " +
+    "-e 'repeat with appName in uiApps' " +
+    `-e 'if appName is not "${APP_NAME}" then' ` +
+    "-e 'try' " +
+    "-e 'tell application appName to quit saving no' " +
+    "-e 'end try' " +
+    "-e 'end if' " +
+    "-e 'end repeat' " +
+    "-e 'delay 0.3' " +
+    "-e 'tell application \"System Events\" to shut down'";
+  const macForceKillAndShutdownCmd =
+    "osascript " +
+    "-e 'tell application \"System Events\" to set uiApps to name of every process whose background only is false' " +
+    "-e 'repeat with appName in uiApps' " +
+    `-e 'if appName is not "${APP_NAME}" then' ` +
+    "-e 'try' " +
+    "-e 'do shell script \"/usr/bin/pkill -9 -x \" & quoted form of (appName as text)' " +
+    "-e 'end try' " +
+    "-e 'end if' " +
+    "-e 'end repeat' " +
+    "-e 'delay 0.2' " +
+    "-e 'tell application \"System Events\" to shut down'";
+
+  // 종료 직전 잠금창 잔류 방지: 보조 잠금창을 모두 닫고 주 창도 화면에서 내린다.
+  currentScreen = "tray-info";
+  closeAllLockWindows();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.setClosable(true);
+      mainWindow.setFullScreen(false);
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.setVisibleOnAllWorkspaces(false);
+      mainWindow.hide();
+      mainWindow.close();
+    } catch {
+      // 이미 파괴 중이거나 상태 전환 중인 경우 무시
+    }
+  }
+
+  console.info("[PCOFF] PC-OFF 성공 —", delayMs, "ms 후 시스템 종료 예약. 명령:", cmd);
+
+  // macOS: 종료 명령은 분리 프로세스에서 실행하고, 현재 Electron 앱은 즉시 종료해
+  // "Electron 종료 실패" 팝업으로 시스템 종료가 막히지 않도록 한다.
+  if (process.platform === "darwin") {
+    const delaySec = Math.max(1, Math.ceil(delayMs / 1000));
+    const detachedScript = `sleep ${delaySec}; ${cmd} || ${macFallbackCmd} || ${macForceKillAndShutdownCmd}`;
+    try {
+      const child = spawn("/bin/sh", ["-c", detachedScript], {
+        detached: true,
+        stdio: "ignore"
+      });
+      child.unref();
+      console.info("[PCOFF] macOS detached shutdown script started");
+    } catch (err) {
+      console.warn("[PCOFF] macOS detached shutdown script start failed:", String(err));
+      isSystemShutdownInProgress = false;
+      isForceQuit = false;
+      return;
+    }
+    setTimeout(() => {
+      try {
+        app.quit();
+        setTimeout(() => app.exit(0), 300);
+      } catch {
+        app.exit(0);
+      }
+    }, 80);
+    return;
+  }
+
+  setTimeout(() => {
+    exec(cmd, (err: Error | null, stdout: string, stderr: string) => {
+      if (err) {
+        console.warn("[PCOFF] 시스템 종료 실행 실패:", err.message, stderr || stdout);
+        void logger?.write(LOG_CODES.OFFLINE_DETECTED, "WARN", {
+          step: "triggerSystemShutdown",
+          error: String(err),
+          stderr: String(stderr),
+          stdout: String(stdout)
+        });
+        if (process.platform === "darwin") {
+          console.warn("[PCOFF] macOS 종료 재시도: 앱 종료 후 shutdown 재호출");
+          exec(macFallbackCmd, (fallbackErr: Error | null, fallbackStdout: string, fallbackStderr: string) => {
+            if (fallbackErr) {
+              console.warn("[PCOFF] macOS 종료 재시도 실패:", fallbackErr.message, fallbackStderr || fallbackStdout);
+              void logger?.write(LOG_CODES.OFFLINE_DETECTED, "WARN", {
+                step: "triggerSystemShutdownFallback",
+                error: String(fallbackErr),
+                stderr: String(fallbackStderr),
+                stdout: String(fallbackStdout)
+              });
+              console.warn("[PCOFF] macOS 종료 2차 재시도: 앱 강제 종료(pkill -9) 후 shutdown");
+              exec(macForceKillAndShutdownCmd, (forceErr: Error | null, forceStdout: string, forceStderr: string) => {
+                if (forceErr) {
+                  console.warn("[PCOFF] macOS 종료 2차 재시도 실패:", forceErr.message, forceStderr || forceStdout);
+                  void logger?.write(LOG_CODES.OFFLINE_DETECTED, "WARN", {
+                    step: "triggerSystemShutdownForceKillFallback",
+                    error: String(forceErr),
+                    stderr: String(forceStderr),
+                    stdout: String(forceStdout)
+                  });
+                  isSystemShutdownInProgress = false;
+                  isForceQuit = false;
+                } else {
+                  console.info("[PCOFF] macOS 종료 2차 재시도 명령 실행됨");
+                }
+              });
+            } else {
+              console.info("[PCOFF] macOS 종료 재시도 명령 실행됨");
+            }
+          });
+        } else {
+          isSystemShutdownInProgress = false;
+          isForceQuit = false;
+        }
+      } else {
+        console.info("[PCOFF] 시스템 종료 명령 실행됨");
+      }
+    });
+  }, delayMs);
+}
+
 ipcMain.handle(
   "pcoff:requestPcOnOffLog",
   async (
@@ -3053,6 +3194,9 @@ ipcMain.handle(
           return { source: "api", success: true, data };
         }
         return { source: "api", success: true, data, stillLocked: true };
+      }
+      if (payload.tmckButnCd === "OUT") {
+        void triggerSystemShutdownIfConfigured();
       }
       return { source: "api", success: true, data };
     } catch (error) {

@@ -254,10 +254,12 @@ function showLeaveSeatReasonModal(work) {
   input.required = !!work.requireReason;
   input.value = "";
   overlay.classList.remove("hidden");
+  if (window.pcoffApi?.setLockModalOpen) window.pcoffApi.setLockModalOpen(true);
   input.focus();
 
   return new Promise((resolve) => {
     const close = (value) => {
+      if (window.pcoffApi?.setLockModalOpen) window.pcoffApi.setLockModalOpen(false);
       overlay.classList.add("hidden");
       btnCancel.removeEventListener("click", onCancel);
       btnConfirm.removeEventListener("click", onConfirm);
@@ -322,10 +324,12 @@ function showLeaveSeatUnlockPasswordModal(policy) {
   }
   passwordInput.value = "";
   overlay.classList.remove("hidden");
+  if (window.pcoffApi?.setLockModalOpen) window.pcoffApi.setLockModalOpen(true);
   passwordInput.focus();
 
   return new Promise((resolve) => {
     const close = (value) => {
+      if (window.pcoffApi?.setLockModalOpen) window.pcoffApi.setLockModalOpen(false);
       overlay.classList.add("hidden");
       btnCancel?.removeEventListener("click", onCancel);
       btnConfirm?.removeEventListener("click", onConfirm);
